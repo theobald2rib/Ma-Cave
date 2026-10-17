@@ -327,3 +327,36 @@ input.cell-edit[data-empl] { width: 160px; }
 .ent-row { display: flex; align-items: center; gap: 14px; }
 .ent-pc { font-family: var(--serif); font-size: 2rem; font-weight: 700; line-height: 1; }
 input[type=range] { accent-color: var(--wine); border: 0; background: transparent; }
+
+/* ---------- Saisie en série ---------- */
+.se-list { display: grid; grid-template-columns: minmax(0, 1fr); gap: 10px; padding-bottom: 80px; }
+.se-list > * { min-width: 0; }
+.se-item { display: flex; gap: 12px; padding: 12px; }
+.se-item .thumb { width: 56px; height: 76px; font-size: 1.4rem; }
+.se-form { grid-template-columns: repeat(auto-fit, minmax(110px, 1fr)); gap: 8px 10px; margin-top: 8px; }
+.se-form input, .se-form select { padding: 6px 8px; }
+.se-form label { font-size: .75rem; margin-bottom: 2px; }
+.se-dup { margin: 8px 0 0; font-weight: 500; color: var(--ink); background: var(--tint-gold); padding: 6px 10px; border-radius: 8px; }
+.se-st { color: var(--muted); }
+.se-pret .se-st { color: var(--info); background: var(--tint-info); }
+.se-analyse .se-st, .se-attente .se-st, .se-envoi .se-st { color: var(--gold); background: var(--tint-gold); }
+.se-erreur .se-st { color: var(--bad); background: var(--tint-bad); }
+.se-enregistre { opacity: .7; }
+.se-enregistre .se-st { color: var(--ok); background: var(--tint-ok); }
+.se-bar { position: fixed; left: 0; right: 0; bottom: 0; z-index: 15; background: var(--paper); border-top: 1px solid var(--line); box-shadow: 0 -4px 16px rgba(0,0,0,.08);
+  padding: 10px max(16px, env(safe-area-inset-right, 0px)) calc(10px + env(safe-area-inset-bottom, 0px)) max(16px, env(safe-area-inset-left, 0px)); }
+.se-bar-in { max-width: 1180px; margin: 0 auto; display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding-right: 70px; }
+
+/* ---------- Dégustations ---------- */
+.dg-mois { text-transform: capitalize; margin: 18px 0 8px; color: var(--muted); font-size: 1.1rem; }
+.dg-item { display: flex; gap: 12px; padding: 12px; margin-bottom: 8px; text-decoration: none; color: inherit; border-left: 4px solid var(--line); }
+.dg-item .t { font-weight: 600; }
+.dg-item .thumb { width: 44px; height: 60px; font-size: 1.3rem; }
+.dg-cave { border-left-color: var(--wine); }
+.dg-ext { border-left-color: var(--gold); }
+.dg-cave .dg-src { color: var(--wine); background: var(--tint-bad); }
+.dg-ext .dg-src { color: var(--gold); background: var(--tint-gold); }
+.dg-src::before { display: none; }
+
+@media (max-width: 520px) { .se-item .thumb { width: 40px; height: 54px; } .se-item { padding: 10px; gap: 8px; } }
+.se-item > div { min-width: 0; }
