@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <!-- Discrétion : aucune indexation, aucun aperçu, aucune archive -->
+  <meta name="robots" content="noindex, nofollow, noarchive, nosnippet, noimageindex, notranslate">
+  <meta name="googlebot" content="noindex, nofollow, noarchive, nosnippet, noimageindex">
+  <meta name="bingbot" content="noindex, nofollow, noarchive, nosnippet">
+  <!-- Ne transmet que le nom de domaine (jamais le chemin) aux sites appelés -->
+  <meta name="referrer" content="strict-origin">
+  <!-- Politique de sécurité du contenu : seules les sources nécessaires sont autorisées -->
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' https://accounts.google.com/gsi/client; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://accounts.google.com/gsi/style; font-src https://fonts.gstatic.com; img-src 'self' data: blob: https://*.googleusercontent.com; connect-src https://script.google.com https://script.googleusercontent.com https://accounts.google.com/gsi/; frame-src https://accounts.google.com/gsi/; object-src 'none'; base-uri 'none'; form-action 'none'; upgrade-insecure-requests">
+  <meta name="format-detection" content="telephone=no">
+  <meta name="theme-color" content="#2a1418">
+  <title>Ma Cave</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'><path d='M22 4h20v14c0 6 6 9 6 18v24H16V36c0-9 6-12 6-18z' fill='%237a1f2b'/><rect x='18' y='38' width='28' height='14' fill='%23f4ead8'/></svg>">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@500;600;700&family=Source+Sans+3:wght@400;500;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
+  <script src="config.js"></script>
+  <script src="https://accounts.google.com/gsi/client" async defer></script>
+</head>
+<body>
+  <!-- Écran de connexion -->
+  <section id="login" class="login" hidden>
+    <div class="login-card">
+      <div class="login-mark" aria-hidden="true">
+        <svg viewBox="0 0 64 64"><path d="M22 4h20v14c0 6 6 9 6 18v24H16V36c0-9 6-12 6-18z"/><rect x="18" y="38" width="28" height="14"/></svg>
+      </div>
+      <h1>Ma Cave</h1>
+      <p class="muted">Vins, champagnes et spiritueux — accès réservé.</p>
+      <div id="gsi-btn"></div>
+      <p id="login-err" class="err" role="alert"></p>
+    </div>
+  </section>
+
+  <!-- Application -->
+  <div id="app" hidden>
+    <header class="top">
+      <a href="#/" class="brand">Ma Cave</a>
+      <nav id="nav" aria-label="Navigation principale">
+        <a href="#/" data-r="">Accueil</a>
+        <a href="#/cave" data-r="cave">Cave</a>
+        <a href="#/ajouter" data-r="ajouter" class="nav-add">+ Ajouter</a>
+        <a href="#/accords" data-r="accords">Accords</a>
+        <a href="#/offres" data-r="offres">Offres</a>
+        <a href="#/prospection" data-r="prospection">Prospection</a>
+        <a href="#/valeur" data-r="valeur">Valeur</a>
+        <a href="#/journal" data-r="journal">Journal</a>
+      </nav>
+      <button id="btn-theme" class="ghost small icon-btn" type="button" aria-label="Thème">Auto</button>
+      <button id="btn-logout" class="ghost small" title="Se déconnecter">Quitter</button>
+    </header>
+    <main id="view" tabindex="-1"></main>
+    <button id="fab" type="button" data-quick="menu" aria-label="Action rapide : bu, mémo, ajout">＋</button>
+  </div>
+
+  <div id="toast" role="status" aria-live="polite"></div>
+  <dialog id="modal"><div id="modal-body"></div></dialog>
+
+  <script src="app.js"></script>
+</body>
+</html>

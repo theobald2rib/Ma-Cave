@@ -1,0 +1,3 @@
+# Site privé : aucun robot n'est autorisé.
+User-agent: *
+Disallow: /
