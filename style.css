@@ -360,3 +360,41 @@ input[type=range] { accent-color: var(--wine); border: 0; background: transparen
 
 @media (max-width: 520px) { .se-item .thumb { width: 40px; height: 54px; } .se-item { padding: 10px; gap: 8px; } }
 .se-item > div { min-width: 0; }
+
+.prompt-box { background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 8px 12px; }
+.prompt-box summary { cursor: pointer; font-weight: 600; }
+.prompt-box pre { white-space: pre-wrap; word-break: break-word; font-size: .8rem; margin: 8px 0 0; max-height: 260px; overflow: auto; user-select: all; }
+
+/* ---------- Doublons ---------- */
+.dup-box { border: 1px solid var(--line); border-left: 4px solid var(--info); background: var(--tint-info); border-radius: 8px; padding: 10px 12px; margin-bottom: 14px; font-size: .92rem; }
+.dup-box.dup-exact { border-left-color: var(--warn); background: var(--tint-warn); }
+.dup-box a { color: inherit; }
+.dup-choice { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; }
+
+/* ---------- Proposition du jour ---------- */
+.jour { margin-bottom: 16px; border-color: var(--gold); background: linear-gradient(180deg, var(--tint-gold), var(--paper) 70%); }
+.jour-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 12px; margin-top: 12px; }
+.jour-item { background: var(--paper); border: 1px solid var(--line); border-radius: 8px; padding: 12px; min-width: 0; display: flex; flex-direction: column; }
+.jour-item .t { font-weight: 700; color: var(--ink); text-decoration: none; }
+.jour-item .t:hover { color: var(--wine); }
+.jour-item button { align-self: flex-start; margin-top: auto !important; }
+
+/* ---------- Inventaire imprimable ---------- */
+table.inv { font-size: .85rem; margin-bottom: 14px; }
+table.inv th, table.inv td { padding: 5px 6px; }
+.inv-card h3 { margin-top: 12px; }
+@media print {
+  .table-wrap { overflow: visible !important; }
+  .top, #fab, .no-print, .demo-band, #toast, body::before { display: none !important; }
+  :root, body { background: #fff !important; color: #000 !important; }
+  main { padding: 0 !important; max-width: none; }
+  .card { box-shadow: none !important; border: 0 !important; padding: 0 !important; background: #fff !important; }
+  table.inv { page-break-inside: auto; }
+  table.inv tr { page-break-inside: avoid; }
+  a { color: #000; text-decoration: none; }
+}
+
+/* ---------- Scan de code-barres ---------- */
+.scan-zone { position: relative; width: 100%; aspect-ratio: 4 / 3; max-height: 50vh; background: #000; border-radius: 10px; overflow: hidden; }
+.scan-zone video { width: 100%; height: 100%; object-fit: cover; display: block; }
+.scan-viseur { position: absolute; left: 12%; right: 12%; top: 35%; bottom: 35%; border: 2px solid rgba(255,255,255,.85); border-radius: 8px; box-shadow: 0 0 0 999px rgba(0,0,0,.25); }
