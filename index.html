@@ -30,7 +30,7 @@
         <svg viewBox="0 0 64 64"><path d="M22 4h20v14c0 6 6 9 6 18v24H16V36c0-9 6-12 6-18z"/><rect x="18" y="38" width="28" height="14"/></svg>
       </div>
       <h1>Ma Cave</h1>
-      <p class="muted">Vins, champagnes et spiritueux — accès réservé.</p>
+      <p class="muted">Vins, champagnes et spiritueux. Accès réservé.</p>
       <div id="gsi-btn"></div>
       <p id="login-err" class="err" role="alert"></p>
     </div>
@@ -44,12 +44,15 @@
         <a href="#/" data-r="">Accueil</a>
         <a href="#/cave" data-r="cave">Cave</a>
         <a href="#/degustations" data-r="degustations">Dégustations</a>
-        <a href="#/ajouter" data-r="ajouter" class="nav-add">+ Ajouter</a>
+        <a href="#/ajouter" data-r="ajouter" class="nav-add admin-only">+ Ajouter</a>
         <a href="#/accords" data-r="accords">Accords</a>
-        <a href="#/offres" data-r="offres">Offres</a>
-        <a href="#/prospection" data-r="prospection">Prospection</a>
-        <a href="#/valeur" data-r="valeur">Valeur</a>
-        <a href="#/journal" data-r="journal">Journal</a>
+        <a href="#/analyser" data-r="analyser" class="ia-visiteur-only">Analyser</a>
+        <a href="#/echanges" data-r="echanges">Échanges<span class="nav-badge" id="nb-ech" hidden></span></a>
+        <a href="#/offres" data-r="offres" class="admin-only">Offres</a>
+        <a href="#/prospection" data-r="prospection" class="admin-only">Prospection</a>
+        <a href="#/valeur" data-r="valeur" class="prix-only">Valeur</a>
+        <a href="#/journal" data-r="journal" class="admin-only">Journal</a>
+        <a href="#/acces" data-r="acces" class="admin-only">Accès</a>
       </nav>
       <button id="btn-theme" class="ghost small icon-btn" type="button" aria-label="Thème">Auto</button>
       <button id="btn-logout" class="ghost small" title="Se déconnecter">Quitter</button>
