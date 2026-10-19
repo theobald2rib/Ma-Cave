@@ -1,4 +1,4 @@
-/* Ma Cave — frontend (JS vanilla, sans dépendance) */
+/* Ma Cave : frontend (JS vanilla, sans dépendance) */
 (function () {
   'use strict';
 
@@ -25,7 +25,7 @@
   function num(v) { var n = Number(String(v === undefined || v === null ? '' : v).replace(',', '.')); return isNaN(n) ? 0 : n; }
   var fmtEurF = new Intl.NumberFormat('fr-FR', { style: 'currency', currency: 'EUR', maximumFractionDigits: 0 });
   var fmtEur2 = new Intl.NumberFormat('fr-FR', { style: 'currency', currency: 'EUR' });
-  function eur(v, precis) { return v ? (precis ? fmtEur2 : fmtEurF).format(v) : '—'; }
+  function eur(v, precis) { return v ? (precis ? fmtEur2 : fmtEurF).format(v) : '-'; }
   function dateFr(d) {
     if (!d) return '';
     var p = String(d).slice(0, 10).split('-');
@@ -35,7 +35,7 @@
     var d = new Date(); d.setMinutes(d.getMinutes() - d.getTimezoneOffset());
     return d.toISOString().slice(0, 10);
   }
-  function libelle(v) { return [v.domaine, v.nom].filter(Boolean).join(' — ') || 'Sans nom'; }
+  function libelle(v) { return [v.domaine, v.nom].filter(Boolean).join(' · ') || 'Sans nom'; }
   function splitList(s) { return String(s || '').split(/[,;]\s*/).map(function (x) { return x.trim(); }).filter(Boolean); }
   function norm(s) { return String(s || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, ''); }
 
@@ -75,7 +75,10 @@
       headers: { 'Content-Type': 'text/plain;charset=utf-8' },
       body: JSON.stringify({ action: action, token: session && session.token, data: data || {} })
     }).then(function (r) { return r.json(); }).then(function (res) {
-      if (res.success) return res.data;
+      if (res.success) {
+        if (res.data && typeof res.data === 'object' && res.data.ia_restant !== undefined) majIaRestant(res.data.ia_restant);
+        return res.data;
+      }
       if (res.error && (res.error.code === 'SESSION' || res.error.code === 'NON_AUTORISE') && action !== 'login') {
         deconnexion(res.error.message);
       }
@@ -85,6 +88,27 @@
     });
   }
   function fail(e) { console.error(e); toast(e.message || String(e), true); }
+
+  /* Rôle : l'affichage s'adapte, mais c'est le serveur qui vérifie chaque action (voir autoriser_ dans Code.gs). */
+  function estAdmin() { return !!session && session.role === 'admin'; }
+  function voitPrix() { return estAdmin() || !!(session && session.voir_prix); }
+  function iaVisiteur() { return !estAdmin() && !!(session && session.quota_ia > 0); }
+  function appliquerRole() {
+    document.body.classList.toggle('visiteur', !estAdmin());
+    document.body.classList.toggle('sans-prix', !voitPrix());
+    document.body.classList.toggle('avec-ia', estAdmin() || iaVisiteur());
+  }
+  function texteIaRestant() {
+    if (!iaVisiteur()) return '';
+    var n = num(session.ia_restant);
+    return n > 0 ? '✨ ' + n + ' analyse' + (n > 1 ? 's' : '') + ' IA restante' + (n > 1 ? 's' : '') + ' aujourd’hui' : '✨ Analyses IA du jour utilisées, rendez-vous demain';
+  }
+  function majIaRestant(n) {
+    if (!session) return;
+    session.ia_restant = n;
+    try { sessionStorage.setItem('cave_session', JSON.stringify(session)); } catch (e) {}
+    $$('.ia-restant').forEach(function (el) { el.textContent = texteIaRestant(); });
+  }
 
   /* =========================================================
    * Authentification (Google Identity Services)
@@ -165,6 +189,34 @@
     return num(b.niveau_entamee) > 0 ? '<span class="tag tag-ent">' + jauge(b.niveau_entamee) + ' entamée ' + Math.round(num(b.niveau_entamee)) + ' %</span>' : '';
   }
 
+  var CATEGORIES_SPIRITUEUX = ['Whisky', 'Rhum', 'Cognac', 'Armagnac', 'Calvados', 'Eau-de-vie de fruits', 'Marc / Grappa', 'Gin', 'Vodka',
+    'Tequila / Mezcal', 'Liqueur de plantes', 'Crème / liqueur de fruits', 'Gentiane / amer', 'Anisé', 'Porto / vin muté', 'Autre'];
+  // Classement sans IA d'après le nom, le domaine et l'appellation
+  var REGLES_CATEGORIE = [
+    [/whisk|scotch|bourbon|single malt|blended|islay|speyside|nikka|yamazaki|hibiki|taketsuru|talisker|macallan|lagavulin|laphroaig|glen/, 'Whisky'],
+    [/\brhums?\b|\brum\b|ron |cachaça|cachaca|rhum agricole|clairin|grogue/, 'Rhum'],
+    [/cognac|fine champagne|grande champagne/, 'Cognac'],
+    [/armagnac|folle blanche|baco/, 'Armagnac'],
+    [/calvados|pommeau|pays d.auge|domfrontais/, 'Calvados'],
+    [/\bmarc\b|grappa/, 'Marc / Grappa'],
+    [/poire williams|williamine|framboise|mirabelle|kirsch|quetsche|prune|eau.de.vie/, 'Eau-de-vie de fruits'],
+    [/\bgin\b/, 'Gin'], [/vodka/, 'Vodka'], [/tequila|mezcal/, 'Tequila / Mezcal'],
+    [/chartreuse|benedictine|génépi|genepi|verveine|izarra|jägermeister|jagermeister|amaro/, 'Liqueur de plantes'],
+    [/gentiane|suze|salers|avèze|aveze|amer /, 'Gentiane / amer'],
+    [/pastis|absinthe|anis|ouzo|raki/, 'Anisé'],
+    [/porto|\bport\b|banyuls|maury|rivesaltes|pineau|madère|madere|xérès|xeres|sherry|marsala|byrrh/, 'Porto / vin muté'],
+    [/crème de|creme de|cassis|curaçao|curacao|cointreau|grand marnier|limoncello|amaretto|liqueur/, 'Crème / liqueur de fruits']
+  ];
+  function estSpiritueux(v) { return /spiritueux|liqueur/i.test(v.type || ''); }
+  function devinerCategorie(v) {
+    var h = norm([v.nom, v.domaine, v.appellation, v.cepages, v.description].join(' '));
+    for (var i = 0; i < REGLES_CATEGORIE.length; i++) if (REGLES_CATEGORIE[i][0].test(h)) return REGLES_CATEGORIE[i][1];
+    return '';
+  }
+  function categorieDe(v) { return estSpiritueux(v) ? (v.categorie || devinerCategorie(v)) : ''; }
+  /** Sous-titre court : appellation, sinon catégorie du spiritueux, sinon type. */
+  function sousTitre(v) { return v.appellation || categorieDe(v) || v.type || ''; }
+
   function pillMat(m) { return '<span class="pill m-' + esc(m) + '">' + esc(MATURITE[m] || m) + '</span>'; }
   function dot(c) { return c ? '<span class="dot c-' + esc(c) + '" title="' + esc(c) + '"></span>' : ''; }
   function options(list, sel, vide) {
@@ -180,8 +232,9 @@
    * ======================================================= */
   var ROUTES = {
     '': vueAccueil, cave: vueCave, bouteille: vueBouteille, ajouter: vueFormulaire, modifier: vueFormulaire,
-    accords: vueAccords, apporter: vueApporter, serie: vueSerie, degustations: vueDegustations, inventaire: vueInventaire, offres: vueOffres, prospection: vueProspection, valeur: vueValeur, journal: vueJournal
+    accords: vueAccords, apporter: vueApporter, serie: vueSerie, degustations: vueDegustations, inventaire: vueInventaire, offres: vueOffres, prospection: vueProspection, valeur: vueValeur, journal: vueJournal, acces: vueAcces, echanges: vueEchanges, analyser: vueAnalyser
   };
+  var ROUTES_ADMIN = ['ajouter', 'modifier', 'serie', 'apporter', 'inventaire', 'offres', 'prospection', 'journal', 'acces'];
 
   function route() {
     if (!session) return;
@@ -191,6 +244,7 @@
     var params = {};
     (q[1] || '').split('&').forEach(function (kv) { if (kv) { var p = kv.split('='); params[p[0]] = decodeURIComponent(p[1] || ''); } });
     var nom = parts[0] || '';
+    if (!estAdmin() && (ROUTES_ADMIN.indexOf(nom) > -1 || (nom === 'valeur' && !voitPrix()) || (nom === 'analyser' && !iaVisiteur()))) { location.hash = '#/'; return; }
     var fn = ROUTES[nom] || vueAccueil;
     $$('#nav a').forEach(function (a) {
       var r = a.getAttribute('data-r');
@@ -208,7 +262,14 @@
   function demarrer() {
     $('#login').hidden = true;
     $('#app').hidden = false;
-    route();
+    if (session.role && session.quota_ia !== undefined) { appliquerRole(); return route(); }
+    // Session ouverte avant l'arrivée des rôles : on demande le rôle au serveur
+    api('moi').then(function (m) {
+      session.role = m.role; session.voir_prix = m.voir_prix; session.proprietaire = m.proprietaire;
+      session.quota_ia = m.quota_ia; session.ia_restant = m.ia_restant;
+      try { sessionStorage.setItem('cave_session', JSON.stringify(session)); } catch (e) {}
+      appliquerRole(); route();
+    }).catch(fail);
   }
 
   /* =========================================================
@@ -226,27 +287,33 @@
       v.innerHTML =
         '<div class="head"><h1>Bonjour' + (session.nom && session.nom !== 'Administrateur' ? ' ' + esc(session.nom.split(' ')[0]) : '') + '</h1>' +
         '<span class="spacer"></span><button class="ghost" data-quick="sortie">🍷 J’ai bu une bouteille</button>' +
-        '<button class="ghost" data-quick="memo">✎ Garder en mémoire</button><a class="btn" href="#/ajouter">📷 Ajouter en cave</a></div>' +
+        '<button class="ghost" data-quick="memo">✎ Garder en mémoire</button><a class="btn" href="#/ajouter">📷 Ajouter en cave</a>' +
+        '<a class="btn ghost ia-visiteur-only" href="#/analyser">🔎 Analyser une bouteille</a>' +
+        '<a class="btn ghost visiteur-only" href="#/echanges?ecrire=1">💡 Recommander une bouteille</a></div>' +
+        (d.echanges_nouveaux ? '<a class="card ap-banner" href="#/echanges" style="margin-bottom:16px"><span class="qi">💬</span><span><strong>' + d.echanges_nouveaux +
+          ' nouveau' + (d.echanges_nouveaux > 1 ? 'x' : '') + ' message' + (d.echanges_nouveaux > 1 ? 's' : '') + '</strong><span class="small muted" style="display:block">' +
+          (estAdmin() ? 'Avis, envies de goûter ou recommandations de vos invités.' : 'Des bouteilles recommandées par ' + esc(proprio()) + '.') + '</span></span><span class="spacer"></span><span>›</span></a>' : '') +
         blocPropositionDuJour(vinsJour, vignJour) +
         '<div class="grid g3" style="grid-template-columns:repeat(auto-fit,minmax(170px,1fr))">' +
           stat(val.nb_bouteilles, 'bouteilles en cave', val.nb_references + ' références') +
-          stat(eur(val.valeur_estimee), 'valeur estimée', pv !== null ? '<span class="' + (pv >= 0 ? 'up' : 'down') + '">' + (pv >= 0 ? '+' : '') + pv + ' % vs achat</span>' : '') +
-          stat(eur(val.valeur_achat), 'valeur d’achat', val.sans_prix ? val.sans_prix + ' sans prix' : '') +
+          (voitPrix() ? stat(eur(val.valeur_estimee), 'valeur estimée', pv !== null ? '<span class="' + (pv >= 0 ? 'up' : 'down') + '">' + (pv >= 0 ? '+' : '') + pv + ' % vs achat</span>' : '') +
+            stat(eur(val.valeur_achat), 'valeur d’achat', val.sans_prix ? val.sans_prix + ' sans prix' : '') : '') +
           stat((m.apogee + m.a_boire_vite + m.passee), 'références à boire', m.apogee + ' à l’apogée') +
         '</div>' +
         '<div class="grid g2" style="margin-top:16px">' +
-          '<div class="card"><h2>À boire en priorité</h2>' +
+          '<div class="card"><h2><a class="h-link" href="#/cave?mat=urgent">À boire en priorité ›</a></h2>' +
             (d.a_boire_en_priorite.length ? '<table><tbody>' + d.a_boire_en_priorite.map(ligne).join('') + '</tbody></table>'
               : '<p class="muted">Rien d’urgent : aucune bouteille ne dépasse sa fenêtre.</p>') + '</div>' +
-          '<div class="card"><h2>À l’apogée</h2>' +
+          '<div class="card"><h2><a class="h-link" href="#/cave?mat=apogee">À l’apogée ›</a></h2>' +
             (d.a_l_apogee.length ? '<table><tbody>' + d.a_l_apogee.map(ligne).join('') + '</tbody></table>'
               : '<p class="muted">Aucune bouteille à son apogée cette année.</p>') + '</div>' +
-          '<div class="card"><h2>Maturité de la cave</h2>' + barresMaturite(m) + '</div>' +
+          '<div class="card"><h2><a class="h-link" href="#/cave?vue=maturite">Maturité de la cave ›</a></h2>' + barresMaturite(m) + '</div>' +
           '<div class="card"><h2>Derniers mouvements</h2>' + tableMvts(d.derniers_mouvements, true) +
             '<p class="small"><a href="#/journal">Tout le journal →</a>' +
             (d.prospection_a_acheter ? ' · <a href="#/prospection">' + d.prospection_a_acheter + ' bouteille(s) à acheter</a>' : '') + '</p></div>' +
         '</div>';
       lierPropositionDuJour(vinsJour);
+      majBadgeEch(d.echanges_nouveaux);
     });
   }
 
@@ -257,21 +324,21 @@
   function barresMaturite(m) {
     var total = MATURITE_ORDRE.reduce(function (s, k) { return s + (m[k] || 0); }, 0) || 1;
     return MATURITE_ORDRE.filter(function (k) { return m[k]; }).map(function (k) {
-      return '<div class="hbar"><span>' + pillMat(k) + '</span><div class="track"><div class="fill" style="width:' +
+      return '<a class="hbar hbar-link" href="#/cave?mat=' + k + '" title="Voir ces bouteilles"><span>' + pillMat(k) + '</span><div class="track"><div class="fill" style="width:' +
         Math.round(m[k] / total * 100) + '%;background:var(--' + ({ passee: 'bad', a_boire_vite: 'warn', apogee: 'gold', a_boire: 'ok' }[k] || 'info') +
-        ')"></div></div><span class="n">' + m[k] + ' réf.</span></div>';
+        ')"></div></div><span class="n">' + m[k] + ' réf. ›</span></a>';
     }).join('') || '<p class="muted">Ajoutez des bouteilles pour voir leur maturité.</p>';
   }
 
   function tableMvts(list, court) {
     if (!list.length) return '<p class="muted">Aucun mouvement.</p>';
     return '<div class="table-wrap"><table><thead><tr><th>Date</th><th>Bouteille</th><th>Type</th><th class="n">Qté</th>' +
-      (court ? '' : '<th class="n">Prix u.</th><th>Détail</th><th></th>') + '</tr></thead><tbody>' +
+      (court ? '' : (voitPrix() ? '<th class="n">Prix u.</th>' : '') + '<th>Détail</th><th></th>') + '</tr></thead><tbody>' +
       list.map(function (m) {
         var q = num(m.quantite);
         return '<tr><td>' + dateFr(m.date) + '</td><td><a href="#/bouteille/' + esc(m.vin_id) + '">' + esc(m.vin_nom || m.vin_id) + '</a></td>' +
           '<td>' + esc(TYPES_MVT[m.type] || m.type) + '</td><td class="n ' + (q > 0 ? 'up' : 'down') + '">' + (q > 0 ? '+' : '') + q + '</td>' +
-          (court ? '' : '<td class="n">' + eur(m.prix_unitaire, true) + '</td><td class="small">' +
+          (court ? '' : (voitPrix() ? '<td class="n">' + eur(m.prix_unitaire, true) + '</td>' : '') + '<td class="small">' +
             esc([m.fournisseur, m.occasion, m.note].filter(Boolean).join(' · ')) + '</td>' +
             '<td><button class="ghost small" data-del-mvt="' + esc(m.id) + '" title="Supprimer">✕</button></td>') + '</tr>';
       }).join('') + '</tbody></table></div>';
@@ -283,7 +350,24 @@
   var filtres = { q: '', type: '', couleur: '', maturite: '', stock: 'en_stock', tri: 'maturite', vue: 'maturite' };
   try { Object.assign(filtres, JSON.parse(localStorage.getItem('cave_filtres') || '{}')); } catch (e) {}
 
-  var VUES = [['maturite', 'Maturité'], ['grille', 'Grille'], ['liste', 'Liste'], ['emplacement', 'Emplacement']];
+  var VUES = [['maturite', 'Maturité'], ['type', 'Par type'], ['grille', 'Grille'], ['liste', 'Liste'], ['emplacement', 'Emplacement']];
+  /** Groupe d'affichage : couleur pour les vins, catégorie pour les spiritueux. */
+  function groupeType(v) {
+    if (estSpiritueux(v)) return categorieDe(v) || 'Spiritueux à classer';
+    if (/bière/i.test(v.type || '')) return 'Bières';
+    return { Rouge: 'Vins rouges', Blanc: 'Vins blancs', Rosé: 'Vins rosés', Effervescent: 'Champagnes et bulles',
+      Liquoreux: 'Liquoreux et moelleux', Moelleux: 'Liquoreux et moelleux' }[v.couleur] ||
+      (/champagne|crémant/i.test(v.type || '') ? 'Champagnes et bulles' : 'Autres');
+  }
+  var ORDRE_GROUPES = ['Vins rouges', 'Vins blancs', 'Vins rosés', 'Champagnes et bulles', 'Liquoreux et moelleux']
+    .concat(CATEGORIES_SPIRITUEUX.filter(function (c) { return c !== 'Autre'; })).concat(['Autre', 'Spiritueux à classer', 'Bières', 'Autres']);
+  function optionsTypes(sel) {
+    var simples = TYPES.filter(function (t) { return !/spiritueux|liqueur/i.test(t); });
+    return '<option value="">Tous types</option>' + options(simples, sel) +
+      '<optgroup label="Spiritueux et liqueurs"><option value="spirits"' + (sel === 'spirits' ? ' selected' : '') + '>Tous les spiritueux</option>' +
+      CATEGORIES_SPIRITUEUX.map(function (c) { return '<option value="cat:' + esc(c) + '"' + (sel === 'cat:' + c ? ' selected' : '') + '>' + esc(c) + '</option>'; }).join('') +
+      '</optgroup>';
+  }
   // Sections de la vue « Par maturité », de la plus urgente à la moins urgente
   var SECTIONS_MAT = [
     ['urgent', 'À boire vite', ['passee', 'a_boire_vite'], 'Fenêtre qui se referme ou déjà dépassée'],
@@ -294,12 +378,588 @@
     ['inconnue', 'Garde non renseignée', ['inconnue'], 'Spiritueux ou fiches à compléter']
   ];
 
+
+  /* =========================================================
+   * Sélection multiple dans la cave : nouvelle analyse IA en lot, emplacement en lot
+   * ======================================================= */
+  var selCave = { actif: false, ids: {} };
+  function nbSel() { return Object.keys(selCave.ids).length; }
+
+  var LIB_CHAMPS = {
+    categorie: 'Catégorie', description: 'Description', aromes_nez: 'Nez', aromes_bouche: 'Bouche', temp_service: 'Service',
+    carafage: 'Carafage', accords: 'Accords', cepages: 'Cépages', boire_des: 'Buvable dès', apogee_debut: 'Apogée début',
+    apogee_fin: 'Apogée fin', boire_avant: 'À boire avant', cote_unitaire: 'Cote (€)', cote_commentaire: 'Commentaire cote'
+  };
+
+  /** Dialogue : que faut-il revoir, et comment. */
+  function dialogueAnalyseLot(vins, apres) {
+    var ids = Object.keys(selCave.ids), n = ids.length;
+    modal('<h2>Nouvelle analyse IA</h2><p class="muted" style="margin-top:-4px">' + n + ' bouteille' + (n > 1 ? 's' : '') + ' sélectionnée' + (n > 1 ? 's' : '') +
+      ' · ' + Math.ceil(n / 15) + ' requête' + (n > 15 ? 's' : '') + ' IA (15 bouteilles par requête)</p>' +
+      '<form id="f-al"><fieldset><legend>À revoir</legend>' +
+        '<label class="row" style="font-weight:500;color:var(--ink);margin:4px 0"><input type="checkbox" name="fiche" checked style="width:auto"> Dégustation, service, accords, cépages, catégorie</label>' +
+        '<label class="row" style="font-weight:500;color:var(--ink);margin:4px 0"><input type="checkbox" name="garde" checked style="width:auto"> Garde (buvable dès, apogée, à boire avant)</label>' +
+        '<label class="row" style="font-weight:500;color:var(--ink);margin:4px 0"><input type="checkbox" name="cote" style="width:auto"> Cote (prix de marché)</label>' +
+      '</fieldset><fieldset><legend>Mode</legend>' +
+        '<label class="row" style="font-weight:500;color:var(--ink);margin:4px 0"><input type="radio" name="mode" value="vides" checked style="width:auto"> Compléter seulement les champs vides</label>' +
+        '<label class="row" style="font-weight:500;color:var(--ink);margin:4px 0"><input type="radio" name="mode" value="remplacer" style="width:auto"> Proposer de remplacer les valeurs actuelles</label>' +
+        '<p class="small muted" style="margin:6px 0 0">Rien n’est modifié sans votre accord : vous verrez chaque changement avant de l’appliquer.</p>' +
+      '</fieldset><div class="row"><span class="spacer"></span><button type="button" class="ghost" id="m-annuler">Annuler</button><button type="submit">✨ Lancer l’analyse</button></div></form>',
+      function (root) {
+        $('#m-annuler', root).onclick = closeModal;
+        $('#f-al', root).onsubmit = function (e) {
+          e.preventDefault();
+          var portees = ['fiche', 'garde', 'cote'].filter(function (p) { return this[p].checked; }, this);
+          if (!portees.length) return toast('Cochez au moins un élément à revoir', true);
+          var mode = this.mode.value, btn = $('button[type=submit]', this), props = [], i = 0;
+          busy(btn, true, '0/' + n);
+          (function suivant() {
+            if (i >= n) return revueAnalyseLot(vins, props, mode, apres);
+            var lot = ids.slice(i, i + 15);
+            btn.innerHTML = '<span class="spin"></span> ' + Math.min(i + lot.length, n) + '/' + n;
+            api('ia.analyserLot', { ids: lot, portees: portees }).then(function (r) {
+              props = props.concat(r.propositions || []); i += lot.length; suivant();
+            }).catch(function (err) {
+              if (err.code === 'IA_QUOTA' || err.code === 'IA_SATURE') {
+                btn.innerHTML = '<span class="spin"></span> pause (' + (err.code === 'IA_QUOTA' ? 'quota' : 'Gemini surchargé') + ')…';
+                return setTimeout(suivant, 30000);
+              }
+              busy(btn, false); fail(err);
+            });
+          })();
+        };
+      });
+  }
+
+  /** Revue des changements proposés, bouteille par bouteille, puis application groupée. */
+  function revueAnalyseLot(vins, props, mode, apres) {
+    var parId = {}; vins.forEach(function (v) { parId[v.id] = v; });
+    var vide = function (x) { return x === '' || x === undefined || x === null; };
+    var pareil = function (a, b) { return String(a === undefined || a === null ? '' : a).trim().toLowerCase() === String(b === undefined || b === null ? '' : b).trim().toLowerCase(); };
+    var court = function (x) { x = String(x === undefined || x === null ? '' : x); return x.length > 70 ? x.slice(0, 68) + '…' : x; };
+    var lignes = props.map(function (p) {
+      var v = parId[p.id]; if (!v) return null;
+      var ch = {};
+      Object.keys(p.champs).forEach(function (c) {
+        var nv = p.champs[c];
+        if (vide(nv) || pareil(nv, v[c])) return;
+        if (c === 'categorie' && !estSpiritueux(v)) return;
+        if (mode === 'vides' && !vide(v[c])) return;
+        ch[c] = nv;
+      });
+      return Object.keys(ch).length ? { v: v, ch: ch } : null;
+    }).filter(Boolean);
+    if (!lignes.length) { closeModal(); return toast('L’IA ne propose aucun changement pour cette sélection.'); }
+    modal('<h2>Changements proposés</h2><p class="muted" style="margin-top:-4px">' + lignes.length + ' bouteille' + (lignes.length > 1 ? 's' : '') +
+      ' concernée' + (lignes.length > 1 ? 's' : '') + '. Décochez celles à ne pas modifier.</p>' +
+      '<div class="rev-list">' + lignes.map(function (l, k) {
+        return '<div class="rev-item"><label class="row" style="font-weight:600;color:var(--ink);margin:0;flex-wrap:nowrap"><input type="checkbox" data-rev="' + k + '" checked style="width:auto">' +
+          '<span>' + esc(libelle(l.v)) + (l.v.millesime ? ' ' + esc(l.v.millesime) : '') + '</span></label>' +
+          '<ul class="rev-ch">' + Object.keys(l.ch).map(function (c) {
+            return '<li><strong>' + esc(LIB_CHAMPS[c] || c) + ' :</strong> ' + (vide(l.v[c]) ? '<span class="muted">vide</span>' : '<s class="muted">' + esc(court(l.v[c])) + '</s>') +
+              ' → ' + esc(court(l.ch[c])) + '</li>';
+          }).join('') + '</ul></div>';
+      }).join('') + '</div>' +
+      '<div class="row" style="margin-top:12px"><button type="button" class="ghost small" id="rev-tout">Tout cocher / décocher</button><span class="spacer"></span>' +
+      '<button type="button" class="ghost" id="m-annuler">Annuler</button><button id="rev-ok">Appliquer</button></div>',
+      function (root) {
+        $('#m-annuler', root).onclick = closeModal;
+        $('#rev-tout', root).onclick = function () {
+          var cases = $$('[data-rev]', root), tous = cases.every(function (c) { return c.checked; });
+          cases.forEach(function (c) { c.checked = !tous; });
+        };
+        $('#rev-ok', root).onclick = function () {
+          var maj = $$('[data-rev]', root).filter(function (c) { return c.checked; }).map(function (c) {
+            var l = lignes[num(c.getAttribute('data-rev'))], m = Object.assign({ id: l.v.id }, l.ch);
+            if (l.ch.cote_unitaire) { m.cote_date = today(); m.cote_source = 'ia'; }
+            return m;
+          });
+          if (!maj.length) return closeModal();
+          var bt = this; busy(bt, true);
+          api('cave.majLot', { maj: maj }).then(function (r) {
+            closeModal(); toast(r.maj + ' fiche' + (r.maj > 1 ? 's' : '') + ' mise' + (r.maj > 1 ? 's' : '') + ' à jour');
+            selCave.ids = {}; invalider(); apres();
+          }).catch(function (e) { busy(bt, false); fail(e); });
+        };
+      });
+  }
+
+  function dialogueEmplacementLot(vins, apres) {
+    var ids = Object.keys(selCave.ids);
+    var lieux = vins.map(function (x) { return x.emplacement; }).filter(Boolean).filter(function (x, i, a) { return a.indexOf(x) === i; });
+    modal('<h2>Changer l’emplacement</h2><p class="muted" style="margin-top:-4px">' + ids.length + ' référence(s) sélectionnée(s)</p>' +
+      '<form id="f-el"><label for="el-v">Nouvel emplacement</label><input id="el-v" list="dl-el" required>' +
+      '<datalist id="dl-el">' + lieux.map(function (x) { return '<option value="' + esc(x) + '">'; }).join('') + '</datalist>' +
+      '<div class="row" style="margin-top:12px"><span class="spacer"></span><button type="button" class="ghost" id="m-annuler">Annuler</button><button type="submit">Déplacer</button></div></form>',
+      function (root) {
+        $('#m-annuler', root).onclick = closeModal;
+        $('#f-el', root).onsubmit = function (e) {
+          e.preventDefault();
+          var val = $('#el-v', root).value.trim(), bt = $('button[type=submit]', this); busy(bt, true);
+          api('cave.majLot', { maj: ids.map(function (id) { return { id: id, emplacement: val }; }) }).then(function (r) {
+            closeModal(); toast(r.maj + ' référence(s) déplacée(s) : ' + val); selCave.ids = {}; invalider(); apres();
+          }).catch(function (e2) { busy(bt, false); fail(e2); });
+        };
+      });
+  }
+
+  /* =========================================================
+   * Accès au site (administrateurs) : qui peut se connecter, avec quels droits
+   * ======================================================= */
+  var ROLES_ACCES = [['visiteur', 'Visiteur (consultation)'], ['admin', 'Administrateur (tout)']];
+  var dernierAjout = '';
+
+  function texteInvitation(u) {
+    var site = location.origin + location.pathname.replace(/index\.html$/, '');
+    return 'Bonjour' + (u.nom ? ' ' + u.nom : '') + ',\n\n' +
+      'Je t’ai ouvert un accès ' + (u.role === 'admin' ? 'complet' : 'en consultation') + ' à ma cave : ' + site + '\n\n' +
+      'Pour te connecter, clique sur « Se connecter avec Google » et choisis l’adresse ' + u.email + '.\n\n' +
+      'Pas de compte Google avec cette adresse ? Tu peux en créer un gratuitement, sans ouvrir de boîte Gmail : ' +
+      'https://accounts.google.com/signup puis « Utiliser mon adresse e-mail actuelle » (un code de vérification est envoyé sur ta boîte).\n\n' +
+      'À bientôt !';
+  }
+  function lienInvitation(u) {
+    return 'mailto:' + u.email + '?subject=' + encodeURIComponent('Accès à ma cave') + '&body=' + encodeURIComponent(texteInvitation(u));
+  }
+
+  function vueAcces(v) {
+    return api('users.lister').then(function (users) {
+      var parEmail = {}; users.forEach(function (u) { parEmail[u.email] = u; });
+      var quand = function (d) {
+        if (!d) return '<span class="muted">jamais</span>';
+        d = String(d); return dateFr(d) + (d.length > 15 ? ' ' + d.slice(11, 16).replace(':', 'h') : '');
+      };
+      var nouveau = parEmail[dernierAjout];
+      v.innerHTML =
+        '<div class="head"><h1>Accès au site</h1><span class="muted">' + users.filter(function (u) { return u.actif; }).length + ' accès actif(s)</span></div>' +
+        (nouveau ? '<div class="dup-box" style="display:flex;gap:10px;align-items:center;flex-wrap:wrap"><span style="flex:1;min-width:220px"><strong>' +
+          esc(nouveau.nom || nouveau.email) + '</strong> peut maintenant se connecter. Envoyez-lui le lien du site :</span>' +
+          '<a class="btn small" href="' + esc(lienInvitation(nouveau)) + '">✉ Préparer l’e-mail</a>' +
+          '<button class="ghost small" data-copier="' + esc(nouveau.email) + '">Copier le message (SMS, WhatsApp…)</button></div>' : '') +
+        '<div class="grid g2">' +
+          '<div class="card"><h2>Ajouter une personne</h2>' +
+            '<form id="f-user"><div class="grid g2" style="gap:10px">' +
+              '<div><label for="u-email">Adresse e-mail</label><input id="u-email" type="email" required autocomplete="off" placeholder="prenom.nom@exemple.fr"></div>' +
+              '<div><label for="u-nom">Prénom ou nom</label><input id="u-nom" autocomplete="off" placeholder="ex. Marie"></div></div>' +
+              '<label for="u-role">Rôle</label><select id="u-role">' + options(ROLES_ACCES, 'visiteur') + '</select>' +
+              '<label class="row" style="font-weight:500;color:var(--ink);margin:10px 0 0"><input type="checkbox" id="u-prix" style="width:auto"> Voir les prix, cotes et la valeur de la cave</label>' +
+              '<div class="row" style="margin-top:10px;gap:8px"><label for="u-ia" style="margin:0;font-weight:500;color:var(--ink)">Analyses IA par jour</label>' +
+                '<input id="u-ia" type="number" min="0" max="50" value="0" style="width:80px"><span class="small muted">0 = pas d’IA</span></div>' +
+              '<p class="small muted" style="margin:8px 0 0">Un visiteur consulte la cave, les fiches, la maturité, les accords et les dégustations, sans rien pouvoir modifier. ' +
+                'Il peut donner son avis sur une bouteille, dire qu’il aimerait la goûter et vous recommander des bouteilles (page Échanges). ' +
+                'Avec des analyses IA, il peut aussi analyser une bouteille (photo ou nom) et demander au sommelier quoi boire avec un plat : ' +
+                'chaque analyse consomme une requête de votre quota Gemini, dans la limite d’un plafond commun à tous les invités (onglet CONFIG, ia_visiteurs_max_jour).</p>' +
+              '<div class="row" style="margin-top:12px"><span class="spacer"></span><button type="submit">Ajouter</button></div></form></div>' +
+          '<div class="card"><h2>Comment se connecter ?</h2>' +
+            '<p>Chaque personne clique sur <strong>« Se connecter avec Google »</strong> et choisit l’adresse inscrite ici.</p>' +
+            '<p><strong>Pas d’adresse Gmail ?</strong> Pas besoin d’en créer une : un compte Google peut utiliser n’importe quelle adresse (Hotmail, Orange, Free, adresse pro…). ' +
+              'Sur <a href="https://accounts.google.com/signup" target="_blank" rel="noopener noreferrer">accounts.google.com/signup</a>, choisir <em>« Utiliser mon adresse e-mail actuelle »</em>, puis saisir le code reçu par e-mail. ' +
+              'Le message d’invitation (✉) l’explique.</p>' +
+            '<p class="small muted">Si l’écran de consentement OAuth de votre projet Google Cloud est en mode « Test », ajoutez aussi l’adresse dans ses utilisateurs test, ou publiez l’application (seuls les scopes de base sont demandés, sans validation par Google).</p></div>' +
+        '</div>' +
+        '<div class="card" style="margin-top:16px;padding:0"><div class="table-wrap"><table class="acces"><thead><tr><th>Personne</th><th>Rôle</th><th>Prix</th><th>IA / jour</th><th>Actif</th><th>Dernière connexion</th><th></th></tr></thead><tbody>' +
+          users.map(function (u) {
+            var verrou = u.moi || u.proprietaire;
+            return '<tr data-u="' + esc(u.email) + '"' + (u.actif ? '' : ' class="inactif"') + '><td><strong>' + esc(u.nom || u.email.split('@')[0]) + '</strong>' +
+              (u.moi ? ' <span class="pill">vous</span>' : u.proprietaire ? ' <span class="pill">propriétaire</span>' : '') +
+              '<div class="small muted">' + esc(u.email) + '</div></td>' +
+              '<td><select data-champ="role"' + (verrou ? ' disabled' : '') + ' aria-label="Rôle de ' + esc(u.email) + '">' + options(ROLES_ACCES, u.role) + '</select></td>' +
+              '<td><input type="checkbox" data-champ="voir_prix"' + (u.voir_prix ? ' checked' : '') + (u.role === 'admin' ? ' disabled' : '') + ' aria-label="Voir les prix" style="width:auto"></td>' +
+              '<td>' + (u.role === 'admin' ? '<span class="small muted">illimitée</span>' : '<input type="number" min="0" max="50" data-champ="quota_ia" value="' + num(u.quota_ia) + '" aria-label="Analyses IA par jour" style="width:64px;padding:4px 6px">' +
+                (u.ia_jour ? '<div class="small muted">' + u.ia_jour + ' aujourd’hui</div>' : '')) + '</td>' +
+              '<td><input type="checkbox" data-champ="actif"' + (u.actif ? ' checked' : '') + (verrou ? ' disabled' : '') + ' aria-label="Accès actif" style="width:auto"></td>' +
+              '<td class="small">' + quand(u.derniere_connexion) + (u.sessions ? '<div class="muted">' + u.sessions + ' session' + (u.sessions > 1 ? 's' : '') + ' ouverte' + (u.sessions > 1 ? 's' : '') + '</div>' : '') + '</td>' +
+              '<td class="n"><div class="row" style="gap:4px;justify-content:flex-end;flex-wrap:nowrap">' +
+                (u.moi ? '' : '<a class="btn ghost small" href="' + esc(lienInvitation(u)) + '" title="Préparer un e-mail d’invitation">✉</a>' +
+                  '<button class="ghost small" data-copier="' + esc(u.email) + '" title="Copier le message d’invitation">⧉</button>') +
+                (!u.moi && u.sessions ? '<button class="ghost small" data-act="deco" title="Fermer ses sessions ouvertes">⏻</button>' : '') +
+                (verrou ? '' : '<button class="ghost small" data-act="suppr" title="Supprimer cet accès">🗑</button>') +
+              '</div></td></tr>';
+          }).join('') + '</tbody></table></div></div>' +
+        '<p class="small muted" style="margin-top:10px">Un changement de rôle, de prix ou la désactivation ferme aussitôt les sessions ouvertes de la personne : elle se reconnecte avec ses nouveaux droits. ' +
+          'Les droits sont vérifiés par le serveur à chaque action, pas seulement à l’affichage.</p>';
+
+      var reafficher = function () { route(); };
+      $('#f-user').onsubmit = function (e) {
+        e.preventDefault();
+        var bt = $('button[type=submit]', this), email = $('#u-email').value.trim().toLowerCase();
+        busy(bt, true);
+        api('users.enregistrer', { nouveau: true, email: email, nom: $('#u-nom').value.trim(), role: $('#u-role').value, voir_prix: $('#u-prix').checked, quota_ia: $('#u-ia').value })
+          .then(function () { dernierAjout = email; toast('Accès ajouté'); reafficher(); })
+          .catch(function (err) { busy(bt, false); fail(err); });
+      };
+      var majPrix = function () { var adm = $('#u-role').value === 'admin'; $('#u-prix').disabled = adm; $('#u-ia').disabled = adm; if (adm) $('#u-prix').checked = true; };
+      $('#u-role').onchange = majPrix;
+      $$('[data-u] [data-champ]').forEach(function (el) {
+        el.onchange = function () {
+          var u = parEmail[el.closest('[data-u]').getAttribute('data-u')];
+          var maj = { email: u.email, nom: u.nom, role: u.role, voir_prix: u.voir_prix, actif: u.actif, quota_ia: u.quota_ia };
+          maj[el.getAttribute('data-champ')] = el.type === 'checkbox' ? el.checked : el.value;
+          api('users.enregistrer', maj).then(function (r) {
+            toast('Accès mis à jour' + (r.sessions_fermees ? ' (' + r.sessions_fermees + ' session' + (r.sessions_fermees > 1 ? 's' : '') + ' fermée' + (r.sessions_fermees > 1 ? 's' : '') + ')' : ''));
+            reafficher();
+          }).catch(function (err) { fail(err); reafficher(); });
+        };
+      });
+      $$('[data-copier]').forEach(function (b) {
+        b.onclick = function () {
+          var txt = texteInvitation(parEmail[b.getAttribute('data-copier')]);
+          var ok = function () { toast('Message copié : collez-le dans un SMS ou un e-mail'); };
+          try { navigator.clipboard.writeText(txt).then(ok, function () { window.prompt('Copiez le message :', txt); }); }
+          catch (err) { window.prompt('Copiez le message :', txt); }
+        };
+      });
+      $$('[data-act]').forEach(function (b) {
+        b.onclick = function () {
+          var u = parEmail[b.closest('[data-u]').getAttribute('data-u')], act = b.getAttribute('data-act');
+          if (act === 'suppr' && !window.demoConfirm('Supprimer l’accès de ' + (u.nom || u.email) + ' ? Ses sessions ouvertes seront fermées.')) return;
+          busy(b, true);
+          api(act === 'suppr' ? 'users.supprimer' : 'users.deconnecter', { email: u.email }).then(function (r) {
+            if (dernierAjout === u.email) dernierAjout = '';
+            toast(act === 'suppr' ? 'Accès supprimé' : r.sessions_fermees + ' session(s) fermée(s)');
+            reafficher();
+          }).catch(function (err) { busy(b, false); fail(err); });
+        };
+      });
+    });
+  }
+
+  /* =========================================================
+   * Échanges : avis et envies des visiteurs, recommandations dans les deux sens
+   * ======================================================= */
+  var TYPES_ECH = { avis: ['✍', 'Avis de dégustation'], envie: ['🙋', 'Aimerait la goûter'], reco: ['💡', 'Recommandation'] };
+  function proprio() { return (session && session.proprietaire) || 'le propriétaire'; }
+  function majBadgeEch(n) {
+    var b = $('#nb-ech'); if (!b) return;
+    b.textContent = n > 9 ? '9+' : String(n || '');
+    b.hidden = !n;
+  }
+  function libEch(x) { return [x.domaine, x.nom].filter(Boolean).join(' · ') + (x.millesime ? ' ' + x.millesime : '') || 'Bouteille'; }
+
+  /** Bloc de la fiche : avis des visiteurs, envies, et boutons selon le rôle. */
+  function blocAvis(b) {
+    var avis = (b.avis || []).filter(function (a) { return a.type === 'avis'; });
+    var envies = (b.avis || []).filter(function (a) { return a.type === 'envie'; });
+    var moy = avis.filter(function (a) { return a.note !== '' && a.note !== undefined; });
+    var suppr = function (a) { return estAdmin() || a.moi ? ' <button class="ghost small lien-suppr" data-suppr-ech="' + esc(a.id) + '" title="Supprimer">✕</button>' : ''; };
+    var dejaEnvie = envies.some(function (a) { return a.moi; });
+    return '<div class="card"><h3>Avis des invités' + (moy.length ? ' <span class="small muted">· ' +
+        (moy.reduce(function (s, a) { return s + num(a.note); }, 0) / moy.length).toFixed(1).replace('.0', '') + '/20 (' + moy.length + ')</span>' : '') + '</h3>' +
+      (avis.length ? '<ul class="avis">' + avis.map(function (a) {
+        return '<li><div class="row" style="gap:6px"><strong>' + esc(a.de_nom) + '</strong>' + (a.note !== '' && a.note !== undefined ? '<span class="pill">' + esc(a.note) + '/20</span>' : '') +
+          '<span class="small muted">' + dateFr(a.cree_le) + '</span>' + suppr(a) + '</div>' + (a.message ? '<p>' + esc(a.message) + '</p>' : '') + '</li>';
+      }).join('') + '</ul>' : '<p class="muted">Aucun avis pour l’instant.</p>') +
+      (envies.length ? '<p class="small" style="margin:8px 0 0">🙋 ' + envies.map(function (a) { return esc(a.moi ? 'Vous' : a.de_nom) + suppr(a); }).join(', ') +
+        (envies.length > 1 ? ' aimeraient' : envies[0].moi ? ' aimeriez' : ' aimerait') + ' la goûter.</p>' : '') +
+      '<div class="row" style="margin-top:10px">' +
+        (estAdmin() ? '<button class="ghost small" id="ech-reco">💌 Recommander à…</button>'
+          : (dejaEnvie ? '' : '<button class="ghost small" id="ech-envie">🙋 J’aimerais la goûter</button>') +
+            '<button class="small" id="ech-avis">✍ Je l’ai goûtée : mon avis</button>') +
+      '</div></div>';
+  }
+
+  function lierAvis(b, apres) {
+    if ($('#ech-avis')) $('#ech-avis').onclick = function () { dialogueAvis(b, apres); };
+    if ($('#ech-envie')) $('#ech-envie').onclick = function () { dialogueEnvie(b, apres); };
+    if ($('#ech-reco')) $('#ech-reco').onclick = function () { dialogueRecoVin(b, apres); };
+    $$('[data-suppr-ech]').forEach(function (x) {
+      x.onclick = function () {
+        if (!window.demoConfirm('Supprimer ce message ?')) return;
+        api('echanges.supprimer', { id: x.getAttribute('data-suppr-ech') }).then(function () { toast('Supprimé'); apres(); }).catch(fail);
+      };
+    });
+  }
+
+  function envoyerEch(btn, data, msg, apres) {
+    busy(btn, true);
+    return api('echanges.envoyer', data).then(function (r) {
+      closeModal(); toast(r.deja ? 'C’était déjà noté' : msg); if (apres) apres();
+    }).catch(function (e) { busy(btn, false); fail(e); });
+  }
+
+  function dialogueAvis(b, apres) {
+    modal('<h2>Mon avis</h2><p class="muted" style="margin-top:-4px">' + esc(libelle(b)) + (b.millesime ? ' ' + esc(b.millesime) : '') + '</p>' +
+      '<form id="f-avis"><label for="av-note">Note sur 20 (facultative)</label><input id="av-note" type="number" min="0" max="20" step="0.5" inputmode="decimal" style="max-width:120px">' +
+      '<label for="av-msg">Impressions</label><textarea id="av-msg" maxlength="1000" placeholder="ex. Superbe sur le gigot, encore un peu jeune, beaucoup de fruit…"></textarea>' +
+      '<p class="small muted">Visible par ' + esc(proprio()) + ' et sur la fiche de la bouteille.</p>' +
+      '<div class="row"><span class="spacer"></span><button type="button" class="ghost" id="m-annuler">Annuler</button><button type="submit">Envoyer</button></div></form>',
+      function (root) {
+        $('#m-annuler', root).onclick = closeModal;
+        $('#f-avis', root).onsubmit = function (e) {
+          e.preventDefault();
+          var note = $('#av-note', root).value.trim(), msg = $('#av-msg', root).value.trim();
+          if (!note && !msg) return toast('Donnez une note ou quelques mots', true);
+          envoyerEch($('button[type=submit]', this), { type: 'avis', vin_id: b.id, note: note, message: msg }, 'Merci pour votre avis !', apres);
+        };
+      });
+  }
+
+  function dialogueEnvie(b, apres) {
+    modal('<h2>J’aimerais la goûter</h2><p class="muted" style="margin-top:-4px">' + esc(libelle(b)) + (b.millesime ? ' ' + esc(b.millesime) : '') + '</p>' +
+      '<form id="f-envie"><label for="en-msg">Un mot pour ' + esc(proprio()) + ' (facultatif)</label>' +
+      '<textarea id="en-msg" maxlength="1000" placeholder="ex. Pour notre prochain dîner ensemble ?"></textarea>' +
+      '<div class="row"><span class="spacer"></span><button type="button" class="ghost" id="m-annuler">Annuler</button><button type="submit">🙋 Envoyer</button></div></form>',
+      function (root) {
+        $('#m-annuler', root).onclick = closeModal;
+        $('#f-envie', root).onsubmit = function (e) {
+          e.preventDefault();
+          envoyerEch($('button[type=submit]', this), { type: 'envie', vin_id: b.id, message: $('#en-msg', root).value.trim() }, 'C’est noté : ' + proprio() + ' le verra', apres);
+        };
+      });
+  }
+
+  /** Administrateur : recommander une bouteille de la cave à un ou plusieurs visiteurs. */
+  function dialogueRecoVin(b, apres) {
+    api('users.lister').then(function (users) {
+      var dest = users.filter(function (u) { return u.actif && !u.moi; });
+      if (!dest.length) return toast('Ajoutez d’abord des personnes dans « Accès »', true);
+      modal('<h2>Recommander cette bouteille</h2><p class="muted" style="margin-top:-4px">' + esc(libelle(b)) + (b.millesime ? ' ' + esc(b.millesime) : '') + '</p>' +
+        '<form id="f-rv"><fieldset><legend>À qui ?</legend>' + choixDestinataires(dest) + '</fieldset>' +
+        '<label for="rv-msg">Message</label><textarea id="rv-msg" maxlength="1000" placeholder="ex. À ouvrir sur une belle pièce de bœuf, carafée une heure."></textarea>' +
+        '<div class="row"><span class="spacer"></span><button type="button" class="ghost" id="m-annuler">Annuler</button><button type="submit">💌 Envoyer</button></div></form>',
+        function (root) {
+          $('#m-annuler', root).onclick = closeModal;
+          $('#f-rv', root).onsubmit = function (e) {
+            e.preventDefault();
+            var pour = $$('[name=pour]:checked', root).map(function (c) { return c.value; });
+            if (!pour.length) return toast('Choisissez au moins une personne', true);
+            envoyerEch($('button[type=submit]', this), { type: 'reco', vin_id: b.id, pour: pour, message: $('#rv-msg', root).value.trim() },
+              'Recommandation envoyée à ' + pour.length + ' personne' + (pour.length > 1 ? 's' : ''), apres);
+          };
+        });
+    }).catch(fail);
+  }
+  function choixDestinataires(dest) {
+    return '<div class="dest">' + dest.map(function (u) {
+      return '<label class="row"><input type="checkbox" name="pour" value="' + esc(u.email) + '" style="width:auto"> ' + esc(u.nom || u.email) +
+        (u.role === 'admin' ? ' <span class="small muted">(administrateur)</span>' : '') + '</label>';
+    }).join('') + '</div>';
+  }
+
+  function vueEchanges(v, _id, params) {
+    return Promise.all([api('echanges.lister'), estAdmin() ? charger('vins', 'cave.lister') : Promise.resolve([])]).then(function (rr) {
+      var r = rr[0], vins = rr[1], items = r.items || [];
+      if (session) session.proprietaire = r.proprietaire;
+      var recus = items.filter(function (x) { return x.recu; });
+      var envoyes = items.filter(function (x) { return x.envoye; });
+      var nouveaux = recus.filter(function (x) { return x.statut === 'nouveau'; }).map(function (x) { return x.id; });
+      // Envois groupés (une recommandation à plusieurs personnes) : une seule carte
+      var groupes = [], vu = {};
+      envoyes.forEach(function (x) {
+        var k = x.groupe || x.id;
+        if (vu[k]) return vu[k].dest.push(x);
+        vu[k] = { x: x, dest: [x] }; groupes.push(vu[k]);
+      });
+      var bouteille = function (x) {
+        var t = esc(libEch(x)) + (x.appellation && x.nom !== x.appellation ? ' <span class="muted">· ' + esc(x.appellation) + '</span>' : '');
+        return x.vin_id ? '<a href="#/bouteille/' + esc(x.vin_id) + '">' + t + '</a>' : t;
+      };
+      var carte = function (x, dest) {
+        var ty = TYPES_ECH[x.type] || ['•', x.type];
+        var qui = x.recu ? 'De <strong>' + esc(x.de_nom) + '</strong>'
+          : 'À ' + (dest || [x]).map(function (d) { return '<strong>' + esc(d.pour === 'admin' ? r.proprietaire : d.pour_nom) + '</strong>' +
+              (d.statut === 'nouveau' ? ' <span class="small muted">(pas encore lu)</span>' : ''); }).join(', ');
+        return '<div class="card ech' + (nouveaux.indexOf(x.id) > -1 ? ' ech-new' : '') + '">' +
+          '<div class="row" style="gap:8px"><span class="qi">' + ty[0] + '</span><div style="flex:1;min-width:0"><div class="small muted">' + ty[1] + ' · ' + qui + ' · ' + dateFr(x.cree_le) + '</div>' +
+          '<div class="t">' + bouteille(x) + (x.type === 'avis' && x.note !== '' ? ' <span class="pill">' + esc(x.note) + '/20</span>' : '') + '</div></div></div>' +
+          (x.message ? '<p style="margin:8px 0 0;white-space:pre-wrap">' + esc(x.message) + '</p>' : '') +
+          (x.lieu || x.prix ? '<p class="small muted" style="margin:6px 0 0">' + [x.lieu ? 'Où : ' + esc(x.lieu) : '', x.prix ? 'Prix : ' + eur(x.prix) : ''].filter(Boolean).join(' · ') + '</p>' : '') +
+          '<div class="row" style="margin-top:8px;justify-content:flex-end">' +
+            (x.recu && x.type === 'reco' && !x.vin_id && estAdmin() ? (x.statut === 'traite' ? '<span class="small muted">Ajoutée à la prospection</span>'
+              : '<button class="ghost small" data-prosp="' + esc(x.id) + '">→ Prospection</button>') : '') +
+            (x.envoye || estAdmin() ? '<button class="ghost small" data-suppr-ech="' + esc(x.id) + '"' + (dest && dest.length > 1 ? ' data-groupe="' + esc(dest.map(function (d) { return d.id; }).join(',')) + '"' : '') + '>Supprimer</button>' : '') +
+          '</div></div>';
+      };
+      var form = estAdmin()
+        ? '<form id="f-reco" class="card"><h2>Recommander une bouteille</h2>' +
+            (r.visiteurs && r.visiteurs.length ? '<fieldset><legend>À qui ?</legend>' + choixDestinataires(r.visiteurs) + '</fieldset>' : '<p class="muted">Ajoutez d’abord des personnes dans <a href="#/acces">Accès</a>.</p>') +
+            '<label for="rc-vin">Bouteille</label><select id="rc-vin"><option value="">Autre bouteille (hors cave)</option>' +
+              vins.filter(function (x) { return x.stock > 0; }).sort(function (a, b) { return libelle(a).localeCompare(libelle(b)); }).map(function (x) {
+                return '<option value="' + esc(x.id) + '">' + esc(libelle(x) + (x.millesime ? ' ' + x.millesime : '')) + '</option>'; }).join('') + '</select>'
+        : '<form id="f-reco" class="card"><h2>Recommander une bouteille à ' + esc(r.proprietaire) + '</h2>' +
+            '<p class="small muted" style="margin-top:-4px">Pour donner votre avis sur une bouteille de la cave, ou dire que vous aimeriez la goûter, ouvrez sa fiche depuis <a href="#/cave">la cave</a>.</p>';
+      form += '<div id="rc-libre"><div class="grid g2" style="gap:10px">' +
+          '<div><label for="rc-dom">Domaine / producteur</label><input id="rc-dom" maxlength="120" placeholder="ex. Domaine Gauby"></div>' +
+          '<div><label for="rc-nom">Cuvée</label><input id="rc-nom" maxlength="120" placeholder="ex. Vieilles Vignes"></div>' +
+          '<div><label for="rc-mil">Millésime</label><input id="rc-mil" maxlength="10" inputmode="numeric" placeholder="ex. 2021"></div>' +
+          '<div><label for="rc-cou">Couleur</label><select id="rc-cou">' + options(COULEURS, '', '-') + '</select></div>' +
+          '<div><label for="rc-lieu">Où la trouver</label><input id="rc-lieu" maxlength="120" placeholder="ex. Caviste de la place, salon…"></div>' +
+          '<div><label for="rc-prix">Prix approximatif (€)</label><input id="rc-prix" type="number" min="0" step="0.5" inputmode="decimal"></div></div></div>' +
+        '<label for="rc-msg">Pourquoi ?</label><textarea id="rc-msg" maxlength="1000" placeholder="ex. Bue chez des amis, superbe sur un poisson, très bon rapport qualité-prix."></textarea>' +
+        '<div class="row" style="margin-top:10px"><span class="spacer"></span><button type="submit">💡 Envoyer</button></div></form>';
+
+      v.innerHTML = '<div class="head"><h1>Échanges</h1><span class="muted">' + (estAdmin() ? 'avis, envies et recommandations de vos invités' : 'avec ' + esc(r.proprietaire)) + '</span></div>' +
+        '<div class="grid g2 ech-grid"><div>' +
+          '<h2>Reçus' + (nouveaux.length ? ' <span class="nav-badge">' + nouveaux.length + '</span>' : '') + '</h2>' +
+          (recus.length ? recus.map(function (x) { return carte(x); }).join('') : '<div class="card empty">' + (estAdmin()
+            ? 'Rien pour l’instant. Vos invités peuvent donner leur avis ou dire qu’ils aimeraient goûter une bouteille depuis sa fiche, et vous recommander des bouteilles ici.'
+            : 'Les bouteilles que ' + esc(r.proprietaire) + ' vous recommande apparaîtront ici.') + '</div>') +
+          (groupes.length ? '<h2 style="margin-top:22px">Envoyés</h2>' + groupes.map(function (g) { return carte(g.x, g.dest); }).join('') : '') +
+        '</div><div>' + form + '</div></div>';
+
+      var recharger = function () { route(); };
+      var majLibre = function () { if ($('#rc-vin')) $('#rc-libre').hidden = !!$('#rc-vin').value; };
+      if ($('#rc-vin')) { $('#rc-vin').onchange = majLibre; majLibre(); }
+      $('#f-reco').onsubmit = function (e) {
+        e.preventDefault();
+        var d = { type: 'reco', message: $('#rc-msg').value.trim() };
+        if ($('#rc-vin') && $('#rc-vin').value) d.vin_id = $('#rc-vin').value;
+        else {
+          d.domaine = $('#rc-dom').value.trim(); d.nom = $('#rc-nom').value.trim(); d.millesime = $('#rc-mil').value.trim();
+          d.couleur = $('#rc-cou').value; d.lieu = $('#rc-lieu').value.trim(); d.prix = $('#rc-prix').value;
+          if (!d.domaine && !d.nom) return toast('Indiquez au moins le domaine ou la cuvée', true);
+        }
+        if (estAdmin()) {
+          d.pour = $$('#f-reco [name=pour]:checked').map(function (c) { return c.value; });
+          if (!d.pour.length) return toast('Choisissez au moins une personne', true);
+        }
+        envoyerEch($('#f-reco button[type=submit]'), d, estAdmin() ? 'Recommandation envoyée' : 'Merci, ' + r.proprietaire + ' la verra dans ses échanges', recharger);
+      };
+      $$('[data-prosp]').forEach(function (bt) {
+        bt.onclick = function () {
+          var x = items.filter(function (i) { return i.id === bt.getAttribute('data-prosp'); })[0];
+          busy(bt, true);
+          api('prosp.enregistrer', { domaine: x.domaine, nom: x.nom, millesime: x.millesime, couleur: x.couleur, appellation: x.appellation,
+            type: 'Vin', prix_vu: x.prix, lieu: x.lieu, origine: 'recommandation', statut: 'repere', date_vue: today(),
+            note: 'Recommandée par ' + x.de_nom + (x.message ? ' : ' + x.message : '') })
+            .then(function () { return api('echanges.marquer', { ids: [x.id], statut: 'traite' }); })
+            .then(function () { toast('Ajoutée à la prospection'); recharger(); })
+            .catch(function (e) { busy(bt, false); fail(e); });
+        };
+      });
+      $$('[data-suppr-ech]').forEach(function (x) {
+        x.onclick = function () {
+          if (!window.demoConfirm('Supprimer ce message ?')) return;
+          var ids = (x.getAttribute('data-groupe') || x.getAttribute('data-suppr-ech')).split(',');
+          Promise.all(ids.map(function (id) { return api('echanges.supprimer', { id: id }); }))
+            .then(function () { toast('Supprimé'); recharger(); }).catch(fail);
+        };
+      });
+      if (params && params.ecrire) setTimeout(function () { $('#f-reco').scrollIntoView({ behavior: 'smooth', block: 'start' }); $('#rc-dom') && $('#rc-dom').focus({ preventScroll: true }); }, 50);
+      // Ouvrir la page vaut lecture : les nouveautés reçues passent en « lu »
+      if (nouveaux.length) api('echanges.marquer', { ids: nouveaux }).then(function () { majBadgeEch(0); }).catch(function () {});
+      else majBadgeEch(0);
+    });
+  }
+
+  /* =========================================================
+   * Analyser une bouteille (visiteur à qui l'IA est ouverte) : fiche complète, rien n'est enregistré
+   * ======================================================= */
+  function maturiteLocale(v) {   // même règle que maturite_ côté serveur
+    var an = ANNEE, des = num(v.boire_des), ad = num(v.apogee_debut), af = num(v.apogee_fin), av = num(v.boire_avant);
+    if (!des && !ad && !af && !av) return 'inconnue';
+    if (av && an > av) return 'passee';
+    if (ad && af && an >= ad && an <= af) return 'apogee';
+    if (af && an > af) return 'a_boire_vite';
+    if (av && an >= av - 1) return 'a_boire_vite';
+    if (des && an < des) return 'trop_jeune';
+    if (ad && an < ad) return 'peut_attendre';
+    return 'a_boire';
+  }
+
+  function vueAnalyser(v) {
+    return charger('vins', 'cave.lister').then(function (vins) {
+      var photo = null, mode = 'photo';
+      v.innerHTML = '<div class="head"><h1>Analyser une bouteille</h1><span class="muted ia-restant">' + texteIaRestant() + '</span></div>' +
+        '<p class="muted" style="margin-top:-6px">Au restaurant, chez un caviste ou chez des amis : photographiez l’étiquette ou donnez le nom de la bouteille. ' +
+          'L’IA décrit le vin, sa garde et ses accords. Rien n’est enregistré.</p>' +
+        '<div class="card"><div class="seg" role="tablist" id="an-mode"><button data-m="photo" aria-selected="true">📷 Photo</button><button data-m="nom" aria-selected="false">✎ Nom</button></div>' +
+          '<div id="an-photo"><div class="drop" id="an-drop" tabindex="0" role="button" aria-label="Prendre ou choisir une photo"><div id="an-drop-in">📷<br>Prendre ou choisir une photo de l’étiquette</div></div>' +
+            '<input type="file" id="an-file" accept="image/*" capture="environment" hidden>' +
+            '<label for="an-indice">Précision (facultatif)</label><input id="an-indice" maxlength="200" placeholder="ex. magnum, millésime sur la contre-étiquette…"></div>' +
+          '<div id="an-nom" hidden><div class="grid g2" style="gap:10px">' +
+            '<div><label for="an-dom">Domaine / producteur</label><input id="an-dom" maxlength="120" placeholder="ex. Château Talbot"></div>' +
+            '<div><label for="an-cuv">Cuvée</label><input id="an-cuv" maxlength="120"></div>' +
+            '<div><label for="an-mil">Millésime</label><input id="an-mil" maxlength="10" inputmode="numeric"></div>' +
+            '<div><label for="an-app">Appellation</label><input id="an-app" maxlength="120"></div></div></div>' +
+          '<div class="row" style="margin-top:12px"><span class="spacer"></span><button id="an-go">✨ Analyser</button></div></div>' +
+        '<div id="an-res"></div>';
+
+      $$('#an-mode button').forEach(function (b) {
+        b.onclick = function () {
+          mode = b.getAttribute('data-m');
+          $$('#an-mode button').forEach(function (x) { x.setAttribute('aria-selected', String(x === b)); });
+          $('#an-photo').hidden = mode !== 'photo'; $('#an-nom').hidden = mode !== 'nom';
+        };
+      });
+      $('#an-drop').onclick = function () { $('#an-file').click(); };
+      $('#an-drop').onkeydown = function (e) { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); $('#an-file').click(); } };
+      $('#an-file').onchange = function () {
+        var f = this.files[0]; if (!f) return;
+        reduireImage(f, 1600, 0.85).then(function (p) {
+          photo = p; $('#an-drop-in').innerHTML = '<img src="' + p.dataUrl + '" alt="Étiquette"><p class="small muted">Toucher pour changer de photo</p>';
+        }).catch(fail);
+      };
+      $('#an-go').onclick = function () {
+        var bt = this, req;
+        if (mode === 'photo') {
+          if (!photo) return toast('Ajoutez d’abord une photo de l’étiquette', true);
+          req = api('ia.etiquette', { base64: photo.base64, mime: photo.mime, indice: $('#an-indice').value.trim() });
+        } else {
+          var vin = { domaine: $('#an-dom').value.trim(), nom: $('#an-cuv').value.trim(), millesime: $('#an-mil').value.trim(), appellation: $('#an-app').value.trim() };
+          if (!vin.domaine && !vin.nom) return toast('Indiquez au moins le domaine ou la cuvée', true);
+          req = api('ia.enrichir', { vin: vin });
+        }
+        busy(bt, true, 'Analyse…');
+        req.then(function (r) { busy(bt, false); afficher(r); }).catch(function (e) { busy(bt, false); fail(e); });
+      };
+
+      function afficher(r) {
+        var kv = function (k, val) { return val ? '<dt>' + k + '</dt><dd>' + val + '</dd>' : ''; };
+        var tags = function (s) { return '<div class="tags">' + splitList(s).map(function (a) { return '<span class="tag">' + esc(a) + '</span>'; }).join('') + '</div>'; };
+        r.maturite = maturiteLocale(r);
+        var d = trouverDoublons(r, vins), enCave = d.exact.concat(d.proches).filter(function (x) { return x.stock > 0; });
+        var garde = num(r.boire_des) || num(r.apogee_debut) || num(r.apogee_fin) || num(r.boire_avant);
+        $('#an-res').innerHTML = '<div class="card" style="margin-top:16px">' +
+          '<div class="row" style="gap:8px;align-items:flex-start"><div style="flex:1;min-width:0"><h2 style="margin:0">' + esc(libelle(r)) + (r.millesime ? ' ' + esc(r.millesime) : '') + '</h2>' +
+            '<p class="muted" style="margin:4px 0 0">' + esc([r.type, r.categorie, r.couleur, r.appellation, r.region, r.pays].filter(Boolean).filter(function (x, i, a) { return a.indexOf(x) === i; }).join(' · ')) + '</p></div>' +
+            (garde ? pillMat(r.maturite) : '') + '</div>' +
+          (r.confiance === 'faible' ? '<div class="dup-box dup-exact" style="margin-top:10px">Identification incertaine : vérifiez le nom et le millésime (essayez une photo plus nette ou l’onglet « Nom »).</div>' : '') +
+          (enCave.length ? '<div class="dup-box" style="margin-top:10px">🍷 ' + (estAdmin() ? 'Dans votre cave' : 'Dans la cave de ' + esc(proprio())) + ' : ' +
+            enCave.slice(0, 4).map(function (x) { return '<a href="#/bouteille/' + esc(x.id) + '">' + descDoublon(x) + '</a>'; }).join(' ; ') + '</div>' : '') +
+          (r.description ? '<p>' + esc(r.description) + '</p>' : '') +
+          (garde ? '<h3>Quand la boire</h3>' + frise(r) + conseilMaturite(r) : '') +
+          '<div class="grid g2" style="margin-top:14px">' +
+            '<div><h3>Dégustation</h3><dl class="kv">' + kv('Nez', r.aromes_nez ? tags(r.aromes_nez) : '') + kv('Bouche', esc(r.aromes_bouche)) +
+              kv('Service', esc(r.temp_service)) + kv('Carafage', esc(r.carafage)) + kv('Cépages', esc(r.cepages)) + kv('Degré', r.degre ? esc(r.degre) + ' %' : '') + '</dl></div>' +
+            '<div><h3>Accords</h3>' + (r.accords ? tags(r.accords) : '<p class="muted">Non renseignés.</p>') +
+              (num(r.cote_unitaire) ? '<h3 style="margin-top:14px">Prix de marché estimé</h3><p style="margin:0">' + eur(r.cote_unitaire) + '</p>' +
+                (r.cote_commentaire ? '<p class="small muted" style="margin:4px 0 0">' + esc(r.cote_commentaire) + '</p>' : '') : '') + '</div>' +
+          '</div>' +
+          '<p class="small muted" style="margin:12px 0 0">Proposition de l’IA, à prendre avec recul : les années de garde et les prix sont des estimations.</p>' +
+          (estAdmin() ? '' : '<div class="row" style="margin-top:12px"><span class="spacer"></span><button id="an-reco">💡 Recommander à ' + esc(proprio()) + '</button></div>') +
+        '</div>';
+        $('#an-res').scrollIntoView({ behavior: 'smooth', block: 'start' });
+        if ($('#an-reco')) $('#an-reco').onclick = function () { dialogueRecoAnalyse(r); };
+      }
+    });
+  }
+
+  /** Visiteur : recommander au propriétaire la bouteille qui vient d'être analysée. */
+  function dialogueRecoAnalyse(r) {
+    modal('<h2>Recommander à ' + esc(proprio()) + '</h2><p class="muted" style="margin-top:-4px">' + esc(libelle(r)) + (r.millesime ? ' ' + esc(r.millesime) : '') + '</p>' +
+      '<form id="f-ra"><div class="grid g2" style="gap:10px"><div><label for="ra-lieu">Où la trouver</label><input id="ra-lieu" maxlength="120" placeholder="ex. Caviste, restaurant…"></div>' +
+      '<div><label for="ra-prix">Prix (€)</label><input id="ra-prix" type="number" min="0" step="0.5" inputmode="decimal"></div></div>' +
+      '<label for="ra-msg">Pourquoi ?</label><textarea id="ra-msg" maxlength="1000" placeholder="ex. Bue au restaurant sur un poisson, superbe."></textarea>' +
+      '<div class="row"><span class="spacer"></span><button type="button" class="ghost" id="m-annuler">Annuler</button><button type="submit">💡 Envoyer</button></div></form>',
+      function (root) {
+        $('#m-annuler', root).onclick = closeModal;
+        $('#f-ra', root).onsubmit = function (e) {
+          e.preventDefault();
+          envoyerEch($('button[type=submit]', this), { type: 'reco', domaine: r.domaine, nom: r.nom, millesime: r.millesime, appellation: r.appellation, couleur: r.couleur,
+            lieu: $('#ra-lieu', root).value.trim(), prix: $('#ra-prix', root).value, message: $('#ra-msg', root).value.trim() }, 'Merci, ' + proprio() + ' la verra dans ses échanges');
+        };
+      });
+  }
+
   function carteBouteille(b, vign) {
     var img = vign[b.id];
-    return '<a class="card bottle' + (b.stock <= 0 ? ' vide' : '') + '" href="#/bouteille/' + esc(b.id) + '">' +
+    return '<a class="card bottle' + (b.stock <= 0 ? ' vide' : '') + (selCave.ids[b.id] ? ' choisie' : '') + '" data-id="' + esc(b.id) + '" href="#/bouteille/' + esc(b.id) + '">' +
+      '<span class="sel-box" aria-hidden="true"></span>' +
       '<div class="thumb" style="' + (img ? 'background-image:url(' + img + ')' : '') + '">' + (img ? '' : esc((b.domaine || b.nom || '?')[0])) + '</div>' +
       '<div style="min-width:0"><div class="t">' + esc(libelle(b)) + '</div>' +
-      '<div class="s">' + dot(b.couleur) + ' ' + esc([b.appellation || b.type, b.millesime].filter(Boolean).join(' · ')) + '</div>' +
+      '<div class="s">' + dot(b.couleur) + ' ' + (estSpiritueux(b) && !b.appellation && !b.categorie && devinerCategorie(b) ? '<em>' + esc(devinerCategorie(b)) + '</em>' + (b.millesime ? ' · ' + esc(b.millesime) : '')
+        : esc([sousTitre(b), b.millesime].filter(Boolean).join(' · '))) + '</div>' +
       '<div class="row" style="margin-top:6px;gap:6px">' + pillMat(b.maturite) + tagEntamee(b) + '</div>' +
       (fenetre(b) ? '<div class="s" style="margin-top:4px">' + fenetre(b) + '</div>' : '') +
       (b.emplacement ? '<div class="s" style="margin-top:2px">📍 ' + esc(b.emplacement) + '</div>' : '') + '</div>' +
@@ -310,6 +970,7 @@
   function lierEditionListe(vins, rendre) {
     var parId = function (id) { return vins.filter(function (x) { return x.id === id; })[0]; };
     var marquer = function (el, ok) { el.classList.remove('saved', 'failed'); void el.offsetWidth; el.classList.add(ok ? 'saved' : 'failed'); };
+    if (!estAdmin()) { $$('.cell-edit').forEach(function (i) { i.readOnly = true; i.tabIndex = -1; }); return; }
     $$('[data-empl]').forEach(function (i) {
       i.onchange = function () {
         var b = parId(i.getAttribute('data-empl')), val = i.value.trim();
@@ -355,38 +1016,46 @@
     return '';
   }
 
-  function vueCave(v) {
+  function vueCave(v, _id, params) {
+    params = params || {};
+    if (params.mat) { filtres.maturite = params.mat; filtres.stock = 'en_stock'; filtres.q = ''; }
+    if (params.vue) { filtres.vue = params.vue; filtres.maturite = ''; }
+    if (params.mat || params.vue) { try { history.replaceState(null, '', '#/cave'); } catch (e) {} }
     return Promise.all([charger('vins', 'cave.lister', true), charger('vign', 'cave.vignettes')]).then(function (r) {
       var vins = r[0], vign = r[1];
       v.innerHTML =
         '<div class="head"><h1>La cave</h1><span class="muted" id="compte"></span><span class="spacer"></span>' +
         (function () { var n = vins.filter(function (x) { return x.stock > 0 && ficheIncomplete(x); }).length;
           return n ? '<button class="ghost small" id="cave-compl" title="Arômes, garde, accords et cote : 1 requête IA pour 15 fiches">✨ Compléter ' + n + ' fiche' + (n > 1 ? 's' : '') + '</button>' : ''; })() +
+        '<button class="ghost small" id="sel-on">☑ Sélectionner</button>' +
         '<button class="ghost small" id="exp">⤓ Exporter</button><a class="btn" href="#/ajouter">+ Ajouter</a></div>' +
         '<div class="seg" role="tablist" aria-label="Affichage" id="vues">' + VUES.map(function (x) {
           return '<button role="tab" data-vue="' + x[0] + '" aria-selected="' + (filtres.vue === x[0]) + '">' + x[1] + '</button>';
         }).join('') + '</div>' +
         '<div class="filters">' +
           '<input class="q" id="f-q" type="search" placeholder="Rechercher : domaine, appellation, cépage, millésime…" value="' + esc(filtres.q) + '">' +
-          '<select id="f-type">' + options(TYPES, filtres.type, 'Tous types') + '</select>' +
+          '<select id="f-type">' + optionsTypes(filtres.type) + '</select>' +
           '<select id="f-couleur">' + options(COULEURS, filtres.couleur, 'Toutes couleurs') + '</select>' +
-          '<select id="f-maturite">' + options(MATURITE_ORDRE.map(function (k) { return [k, MATURITE[k]]; }), filtres.maturite, 'Toute maturité') + '</select>' +
+          '<select id="f-maturite">' + options([['urgent', 'À boire vite + passé']].concat(MATURITE_ORDRE.map(function (k) { return [k, MATURITE[k]]; })), filtres.maturite, 'Toute maturité') + '</select>' +
           '<select id="f-tri">' + options([['maturite', 'Tri : urgence'], ['nom', 'Tri : nom'], ['millesime', 'Tri : millésime'],
-            ['stock', 'Tri : quantité'], ['valeur', 'Tri : valeur'], ['recent', 'Tri : ajout récent']], filtres.tri) + '</select>' +
+            ['stock', 'Tri : quantité']].concat(voitPrix() ? [['valeur', 'Tri : valeur']] : []).concat([['recent', 'Tri : ajout récent']]), filtres.tri) + '</select>' +
         '</div>' +
         '<div class="row" style="margin:-6px 0 14px"><label class="row small" style="margin:0;font-weight:500">' +
           '<input type="checkbox" id="f-stock" style="width:auto"' + (filtres.stock === 'tout' ? ' checked' : '') + '> Afficher aussi les bouteilles épuisées</label></div>' +
-        '<div id="liste"></div>';
+        '<div id="filtres-actifs" class="row" style="gap:6px;margin:-4px 0 12px"></div>' +
+        '<div id="liste"></div><div class="se-bar" id="sel-bar" hidden></div>';
 
       function rendre() {
         var q = norm(filtres.q);
         var l = vins.filter(function (b) {
           if (filtres.stock !== 'tout' && b.stock <= 0) return false;
-          if (filtres.type && b.type !== filtres.type) return false;
+          if (filtres.type === 'spirits' && !estSpiritueux(b)) return false;
+          if (/^cat:/.test(filtres.type) && categorieDe(b) !== filtres.type.slice(4)) return false;
+          if (filtres.type && filtres.type !== 'spirits' && !/^cat:/.test(filtres.type) && b.type !== filtres.type) return false;
           if (filtres.couleur && b.couleur !== filtres.couleur) return false;
-          if (filtres.maturite && b.maturite !== filtres.maturite) return false;
+          if (filtres.maturite === 'urgent' ? ['passee', 'a_boire_vite'].indexOf(b.maturite) < 0 : filtres.maturite && b.maturite !== filtres.maturite) return false;
           if (q) {
-            var hay = norm([b.nom, b.domaine, b.appellation, b.region, b.pays, b.millesime, b.cepages, b.emplacement, b.type, b.couleur].join(' '));
+            var hay = norm([b.nom, b.domaine, b.appellation, b.region, b.pays, b.millesime, b.cepages, b.emplacement, b.type, b.couleur, categorieDe(b)].join(' '));
             return q.split(/\s+/).every(function (w) { return hay.indexOf(w) > -1; });
           }
           return true;
@@ -403,6 +1072,21 @@
         var nbBtl = function (arr) { return arr.reduce(function (s, b) { return s + Math.max(0, b.stock); }, 0); };
         var nb = nbBtl(l);
         $('#compte').textContent = l.length + ' référence' + (l.length > 1 ? 's' : '') + ' · ' + nb + ' bouteille' + (nb > 1 ? 's' : '');
+        var actifs = [];
+        if (filtres.maturite) actifs.push(['maturite', filtres.maturite === 'urgent' ? 'À boire vite + passé' : MATURITE[filtres.maturite]]);
+        if (filtres.type) actifs.push(['type', filtres.type === 'spirits' ? 'Tous les spiritueux' : filtres.type.replace(/^cat:/, '')]);
+        if (filtres.couleur) actifs.push(['couleur', filtres.couleur]);
+        if (filtres.q) actifs.push(['q', '« ' + filtres.q + ' »']);
+        $('#filtres-actifs').innerHTML = actifs.length ? actifs.map(function (a) {
+          return '<button class="chip-on" data-raz="' + a[0] + '">' + esc(a[1]) + ' ✕</button>'; }).join('') +
+          (actifs.length > 1 ? '<button class="ghost small" data-raz="tout">Tout effacer</button>' : '') : '';
+        $$('#filtres-actifs [data-raz]').forEach(function (x) {
+          x.onclick = function () {
+            var k = x.getAttribute('data-raz');
+            (k === 'tout' ? ['maturite', 'type', 'couleur', 'q'] : [k]).forEach(function (c) { filtres[c] = ''; var el = $('#f-' + c); if (el) el.value = ''; });
+            rendre();
+          };
+        });
         $$('#vues button').forEach(function (b) { b.setAttribute('aria-selected', String(b.getAttribute('data-vue') === filtres.vue)); });
         var grille = function (arr) { return '<div class="bottles">' + arr.map(function (b) { return carteBouteille(b, vign); }).join('') + '</div>'; };
         var html;
@@ -422,6 +1106,28 @@
                 '<span class="muted small">' + x.s[3] + '</span><span class="spacer"></span><span class="small"><strong>' + nbBtl(x.arr) + '</strong> btl · ' + x.arr.length + ' réf.</span></div>' +
                 grille(x.arr) + '</section>';
             }).join('');
+        } else if (filtres.vue === 'type') {
+          var groupes = {};
+          l.forEach(function (b) { var g = groupeType(b); (groupes[g] = groupes[g] || []).push(b); });
+          var aClasser = vins.filter(function (b) { return b.stock > 0 && estSpiritueux(b) && !b.categorie && devinerCategorie(b); });
+          var inconnus = vins.filter(function (b) { return b.stock > 0 && estSpiritueux(b) && !b.categorie && !devinerCategorie(b); });
+          html = (aClasser.length || inconnus.length ? '<div class="dup-box" style="display:flex;gap:10px;align-items:center;flex-wrap:wrap"><span style="flex:1;min-width:220px">' +
+              (aClasser.length ? '<strong>' + aClasser.length + ' spiritueux</strong> classés d’après leur nom, sans IA (en italique ci-dessous). ' : '') +
+              (inconnus.length ? inconnus.length + ' à classer : choisissez leur catégorie dans « Modifier », ou « ✨ Compléter » les fiches.' : '') + '</span>' +
+              (aClasser.length ? '<button class="small" id="cat-save">Enregistrer ce classement</button>' : '') + '</div>' : '') +
+            Object.keys(groupes).sort(function (a, b) { return ORDRE_GROUPES.indexOf(a) - ORDRE_GROUPES.indexOf(b); }).map(function (k) {
+              return '<section class="mat-sec"><div class="mat-head"><h2>' + esc(k) + '</h2><span class="spacer"></span><span class="small"><strong>' +
+                nbBtl(groupes[k]) + '</strong> btl · ' + groupes[k].length + ' réf.</span></div>' + grille(groupes[k]) + '</section>';
+            }).join('');
+          setTimeout(function () {
+            if ($('#cat-save')) $('#cat-save').onclick = function () {
+              var bt = this; busy(bt, true);
+              api('cave.majLot', { maj: aClasser.map(function (b) { return { id: b.id, categorie: devinerCategorie(b) }; }) }).then(function (r) {
+                aClasser.forEach(function (b) { b.categorie = devinerCategorie(b); });
+                toast(r.maj + ' spiritueux classés'); invalider(); rendre();
+              }).catch(function (e) { busy(bt, false); fail(e); });
+            };
+          }, 0);
         } else if (filtres.vue === 'emplacement') {
           var lieux = {};
           l.forEach(function (b) { (lieux[b.emplacement || 'Sans emplacement'] = lieux[b.emplacement || 'Sans emplacement'] || []).push(b); });
@@ -433,24 +1139,28 @@
           var lieux = vins.map(function (x) { return x.emplacement; }).filter(Boolean).filter(function (x, i, a) { return a.indexOf(x) === i; }).sort();
           html = '<p class="small muted" style="margin:0 0 8px">Modifiez l’emplacement ou le stock directement dans le tableau. Une correction de stock est enregistrée comme ajustement d’inventaire ; pour une bouteille bue ou offerte, utilisez 🍷 (historique et notes).</p>' +
             '<datalist id="dl-empl-liste">' + lieux.map(function (x) { return '<option value="' + esc(x) + '">'; }).join('') + '</datalist>' +
-            '<div class="card" style="padding:0"><div class="table-wrap"><table class="liste"><thead><tr><th>Bouteille</th><th>Millésime</th><th>Maturité</th>' +
-            '<th>Fenêtre</th><th>Emplacement</th><th class="n">Stock</th><th class="n">Valeur</th></tr></thead><tbody>' +
+            '<div class="card" style="padding:0"><div class="table-wrap"><table class="liste"><thead><tr><th class="sel-td"></th><th>Bouteille</th><th>Millésime</th><th>Maturité</th>' +
+            '<th>Fenêtre</th><th>Emplacement</th><th class="n">Stock</th>' + (voitPrix() ? '<th class="n">Valeur</th>' : '') + '</tr></thead><tbody>' +
             l.map(function (b) {
-              return '<tr><td>' + dot(b.couleur) + ' <a href="#/bouteille/' + esc(b.id) + '">' + esc(libelle(b)) + '</a>' +
-                '<div class="small muted">' + esc(b.appellation || b.type) + '</div></td><td>' + esc(b.millesime || '—') + '</td><td>' + pillMat(b.maturite) + '</td>' +
+              return '<tr><td class="sel-td"><input type="checkbox" data-selid="' + esc(b.id) + '"' + (selCave.ids[b.id] ? ' checked' : '') + ' aria-label="Sélectionner" style="width:auto"></td>' +
+                '<td>' + dot(b.couleur) + ' <a href="#/bouteille/' + esc(b.id) + '">' + esc(libelle(b)) + '</a>' +
+                '<div class="small muted">' + esc(b.appellation || b.type) + '</div></td><td>' + esc(b.millesime || '-') + '</td><td>' + pillMat(b.maturite) + '</td>' +
                 '<td class="small">' + esc(fenetre(b)) + '</td>' +
-                '<td><input class="cell-edit" data-empl="' + esc(b.id) + '" list="dl-empl-liste" value="' + esc(b.emplacement) + '" placeholder="—" aria-label="Emplacement de ' + esc(libelle(b)) + '"></td>' +
+                '<td><input class="cell-edit" data-empl="' + esc(b.id) + '" list="dl-empl-liste" value="' + esc(b.emplacement) + '" placeholder="-" aria-label="Emplacement de ' + esc(libelle(b)) + '"></td>' +
                 '<td class="n"><div class="stepper"><button type="button" class="ghost small" data-pas="-1" data-id="' + esc(b.id) + '" aria-label="Retirer une bouteille">−</button>' +
                   '<input class="cell-edit n" data-stock="' + esc(b.id) + '" type="number" min="0" value="' + b.stock + '" aria-label="Stock de ' + esc(libelle(b)) + '">' +
                   '<button type="button" class="ghost small" data-pas="1" data-id="' + esc(b.id) + '" aria-label="Ajouter une bouteille">+</button>' +
                   '<button type="button" class="ghost small" data-boire="' + esc(b.id) + '" title="Bue, offerte, sortie…"' + (b.stock > 0 ? '' : ' disabled') + '>🍷</button></div>' +
                   (num(b.niveau_entamee) > 0 ? '<div class="small muted">dont 1 entamée (' + Math.round(num(b.niveau_entamee)) + ' %)</div>' : '') + '</td>' +
-                '<td class="n">' + eur(b.stock * (num(b.cote_unitaire) || b.prix_moyen)) + '</td></tr>';
+                (voitPrix() ? '<td class="n">' + eur(b.stock * (num(b.cote_unitaire) || b.prix_moyen)) + '</td>' : '') + '</tr>';
             }).join('') + '</tbody></table></div></div>';
         } else {
           html = grille(l);
         }
         $('#liste').innerHTML = html;
+        $('#liste').classList.toggle('mode-sel', selCave.actif);
+        affiches = l;
+        majBarreSel();
         lierEditionListe(vins, rendre);
         $$('.mat-chip').forEach(function (c) {
           c.onclick = function () { var t = $('#sec-' + c.getAttribute('data-sec')); if (t) t.scrollIntoView({ behavior: 'smooth', block: 'start' }); };
@@ -462,6 +1172,42 @@
       ['type', 'couleur', 'maturite', 'tri'].forEach(function (k) {
         $('#f-' + k).addEventListener('change', function () { filtres[k] = this.value; rendre(); });
       });
+      /* --- Sélection multiple --- */
+      var affiches = [];
+      function majBarreSel() {
+        var bar = $('#sel-bar'); if (!bar) return;
+        bar.hidden = !selCave.actif;
+        $('#sel-on').textContent = selCave.actif ? '✕ Fin de sélection' : '☑ Sélectionner';
+        if (!selCave.actif) return;
+        var n = nbSel();
+        bar.innerHTML = '<div class="se-bar-in"><span><strong>' + n + '</strong> sélectionnée' + (n > 1 ? 's' : '') + '</span>' +
+          '<button class="ghost small" id="sel-tout">Tout (' + affiches.length + ' affichées)</button><button class="ghost small" id="sel-rien"' + (n ? '' : ' disabled') + '>Aucune</button>' +
+          '<span class="spacer"></span><button class="ghost small" id="sel-empl"' + (n ? '' : ' disabled') + '>📍 Emplacement</button>' +
+          '<button id="sel-ia"' + (n ? '' : ' disabled') + '>✨ Nouvelle analyse IA</button></div>';
+        $('#sel-tout').onclick = function () { affiches.forEach(function (b) { selCave.ids[b.id] = true; }); rendre(); };
+        $('#sel-rien').onclick = function () { selCave.ids = {}; rendre(); };
+        $('#sel-ia').onclick = function () { dialogueAnalyseLot(vins, function () { route(); }); };
+        $('#sel-empl').onclick = function () { dialogueEmplacementLot(vins, function () { route(); }); };
+      }
+      $('#sel-on').onclick = function () { selCave.actif = !selCave.actif; if (!selCave.actif) selCave.ids = {}; rendre(); };
+      // En mode sélection, toucher une carte la coche au lieu d'ouvrir la fiche
+      $('#liste').addEventListener('click', function (e) {
+        if (!selCave.actif) return;
+        var carte = e.target.closest('.bottle');
+        if (!carte) return;
+        e.preventDefault();
+        var id = carte.getAttribute('data-id');
+        if (selCave.ids[id]) delete selCave.ids[id]; else selCave.ids[id] = true;
+        carte.classList.toggle('choisie', !!selCave.ids[id]);
+        majBarreSel();
+      });
+      $('#liste').addEventListener('change', function (e) {
+        var id = e.target.getAttribute && e.target.getAttribute('data-selid');
+        if (!id) return;
+        if (e.target.checked) selCave.ids[id] = true; else delete selCave.ids[id];
+        majBarreSel();
+      });
+
       $('#f-stock').addEventListener('change', function () { filtres.stock = this.checked ? 'tout' : 'en_stock'; rendre(); });
       $('#exp') && $('#exp').addEventListener('click', dialogueExport);
       if ($('#cave-compl')) $('#cave-compl').onclick = function () {
@@ -487,6 +1233,12 @@
         '<div class="fiche">' +
           '<div>' +
             '<div class="photo" id="photo" style="' + (img ? 'background-image:url(' + img + ')' : '') + '">' + (img ? '' : 'Pas de photo') + '</div>' +
+            '<div class="galerie" id="galerie"></div>' +
+            '<div class="row photo-actions" style="justify-content:center;margin-top:8px">' +
+              '<button class="ghost small" id="ph-change">📷 ' + (b.photo_id ? 'Changer la photo' : 'Ajouter une photo') + '</button>' +
+              (b.photo_id ? '<button class="ghost small" id="ph-add">+ Autre photo</button>' : '') +
+              '<input type="file" id="ph-file" accept="image/*" capture="environment" hidden></div>' +
+            '<div class="row" id="ph-sel" style="justify-content:center;margin-top:6px" hidden></div>' +
             '<div class="card" style="margin-top:14px;text-align:center">' +
               '<div class="qty" style="margin:0 auto;text-align:center">' + b.stock + '<small>bouteille' + (b.stock > 1 ? 's' : '') + ' en cave' +
                 (num(b.niveau_entamee) > 0 ? ' dont 1 entamée' : '') + '</small></div>' +
@@ -499,12 +1251,12 @@
                 '<button class="ghost small" id="b-ajust">Inventaire</button>' +
               '</div>' +
             '</div>' +
-            (entamable(b) && b.stock > 0 ? blocEntamee(b) : '') +
+            (entamable(b) && b.stock > 0 && (estAdmin() || num(b.niveau_entamee) > 0) ? blocEntamee(b) : '') +
           '</div>' +
           '<div>' +
             '<div class="head" style="margin-bottom:8px"><div><h1>' + esc(libelle(b)) + '</h1>' +
               '<div class="row">' + dot(b.couleur) + '<span class="muted">' + esc([b.type, b.couleur, b.appellation, b.millesime].filter(Boolean).join(' · ')) + '</span>' +
-              pillMat(b.maturite) + (b.statut === 'archive' ? '<span class="pill">Archivée</span>' : '') + '</div></div>' +
+              '<a href="#/cave?mat=' + esc(b.maturite) + '" title="Toutes les bouteilles dans ce cas">' + pillMat(b.maturite) + '</a>' + (b.statut === 'archive' ? '<span class="pill">Archivée</span>' : '') + '</div></div>' +
               '<span class="spacer"></span><a class="btn ghost small" href="#/modifier/' + esc(b.id) + '">Modifier</a>' +
               '<button class="ghost small" id="b-archiver">' + (b.statut === 'archive' ? 'Restaurer' : 'Archiver') + '</button></div>' +
 
@@ -523,18 +1275,19 @@
               '<div class="card"><h3>Accords</h3>' +
                 (b.accords ? '<div class="tags">' + splitList(b.accords).map(function (a) { return '<span class="tag">' + esc(a) + '</span>'; }).join('') + '</div>' : '<p class="muted">Non renseignés.</p>') +
                 '<h3 style="margin-top:18px">Identité</h3><dl class="kv">' +
-                  kv('Domaine', esc(b.domaine)) + kv('Appellation', esc(b.appellation)) + kv('Région', esc([b.region, b.pays].filter(Boolean).join(', '))) +
+                  kv('Domaine', esc(b.domaine)) + kv('Catégorie', esc(categorieDe(b)) + (estSpiritueux(b) && !b.categorie && categorieDe(b) ? ' <span class="small muted">(devinée)</span>' : '')) + kv('Appellation', esc(b.appellation)) + kv('Région', esc([b.region, b.pays].filter(Boolean).join(', '))) +
                   kv('Cépages', esc(b.cepages)) + kv('Degré', b.degre ? esc(b.degre) + ' %' : '') + kv('Contenance', b.contenance_cl ? esc(b.contenance_cl) + ' cl' : '') +
                   kv('Emplacement', esc(b.emplacement)) + kv('Référence', '<span class="muted small">' + esc(b.id) + '</span>') +
                 '</dl></div>' +
-              '<div class="card"><h3>Valeur</h3><dl class="kv">' +
+              (!voitPrix() ? '' : '<div class="card"><h3>Valeur</h3><dl class="kv">' +
                 kv('Prix moyen d’achat', eur(b.prix_moyen, true)) +
                 kv('Cote estimée', num(b.cote_unitaire) ? eur(b.cote_unitaire, true) + (pv !== null ? ' <span class="' + (pv >= 0 ? 'up' : 'down') + '">(' + (pv >= 0 ? '+' : '') + pv + ' %)</span>' : '') : '') +
                 kv('Valeur du stock', eur(b.stock * (num(b.cote_unitaire) || b.prix_moyen))) +
                 kv('Cote', b.cote_date ? dateFr(b.cote_date) + ' · ' + (b.cote_source === 'ia' ? 'estimation IA' : 'saisie manuelle') : '') +
                 '</dl>' + (b.cote_commentaire ? '<p class="small muted">' + esc(b.cote_commentaire) + '</p>' : '') +
-                '<button class="ghost small" id="b-coter">✨ Réestimer la cote</button></div>' +
-              '<div class="card"><h3>Mes notes</h3>' +
+                '<button class="ghost small" id="b-coter">✨ Réestimer la cote</button></div>') +
+              blocAvis(b) +
+              '<div class="card"><h3>' + (estAdmin() ? 'Mes notes' : 'Notes de ' + esc(proprio())) + '</h3>' +
                 (b.note_perso ? '<p class="stat" style="padding:0"><span class="v">' + esc(b.note_perso) + '</span><span class="muted">/20</span></p>' : '') +
                 (b.notes_perso ? '<p style="white-space:pre-wrap">' + esc(b.notes_perso) + '</p>' : '<p class="muted">Aucune note personnelle.</p>') +
                 '<p class="small muted">Achetées : ' + b.achetees + ' · Bues/sorties : ' + b.consommees +
@@ -544,9 +1297,7 @@
           '</div>' +
         '</div>';
 
-      if (b.photo_id) api('cave.photo', { id: id }).then(function (src) {
-        if (src && $('#photo')) { $('#photo').style.backgroundImage = 'url(' + src + ')'; $('#photo').textContent = ''; }
-      }).catch(function () {});
+      galeriePhotos(b, function () { delete cache.vign; route(); });
 
       var recharger = function () { invalider(); route(); };
       $('#b-boire').onclick = function () { dialogueSortie(b, 'consommation'); };
@@ -557,7 +1308,7 @@
       $('#b-archiver').onclick = function () {
         api('cave.archiver', { id: b.id, restaurer: b.statut === 'archive' }).then(recharger).catch(fail);
       };
-      $('#b-coter').onclick = function () {
+      if ($('#b-coter')) $('#b-coter').onclick = function () {
         var btn = this; busy(btn, true, 'Estimation…');
         api('ia.coter', { id: b.id }).then(function (r) { toast('Cote estimée : ' + eur(r.cote_unitaire, true)); recharger(); })
           .catch(function (e) { busy(btn, false); fail(e); });
@@ -570,6 +1321,7 @@
         }).catch(function (e) { busy(btn, false); fail(e); });
       };
       lierSuppressionMvt(v, recharger);
+      lierAvis(b, function () { route(); });
     });
   }
 
@@ -608,12 +1360,71 @@
     if ($('#e-finie')) $('#e-finie').onclick = function () { envoyer({ finie: true }); };
   }
 
+  /** Galerie de la fiche : photo principale + autres photos ; changer, ajouter, définir comme principale, retirer. */
+  function galeriePhotos(b, apres) {
+    var imgs = {}, choisie = null, mode = 'principale';
+    var afficher = function (pid) {
+      choisie = pid;
+      if (imgs[pid] && $('#photo')) { $('#photo').style.backgroundImage = 'url(' + imgs[pid] + ')'; $('#photo').textContent = ''; }
+      $$('#galerie .gal-th').forEach(function (t) { t.classList.toggle('on', t.getAttribute('data-pid') === pid); });
+      var sel = $('#ph-sel'); if (!sel) return;
+      var principale = pid === b.photo_id;
+      sel.hidden = !pid;
+      sel.innerHTML = (principale ? '<span class="small muted">Photo principale</span>' : '<button class="ghost small" id="ph-main">⭐ Mettre en principale</button>') +
+        '<button class="ghost small" id="ph-del">🗑 Retirer cette photo</button>';
+      if ($('#ph-main')) $('#ph-main').onclick = function () {
+        var bt = this; busy(bt, true);
+        reduireSource(imgs[pid], 220, 0.7).then(function (v) {
+          return api('cave.photoPrincipale', { id: b.id, photo_id: pid, vignette: v.dataUrl });
+        }).then(function () { toast('Photo principale changée'); apres(); }).catch(function (e) { busy(bt, false); fail(e); });
+      };
+      $('#ph-del').onclick = function () {
+        if (!window.demoConfirm('Retirer cette photo ? Elle sera mise à la corbeille de Google Drive.')) return;
+        var bt = this; busy(bt, true);
+        var suivante = principale ? ordre.filter(function (x) { return x !== pid; })[0] : null;
+        (suivante && imgs[suivante] ? reduireSource(imgs[suivante], 220, 0.7) : Promise.resolve(null)).then(function (v) {
+          return api('cave.retirerPhoto', { id: b.id, photo_id: pid, vignette: v ? v.dataUrl : '' });
+        }).then(function () { toast('Photo retirée'); apres(); }).catch(function (e) { busy(bt, false); fail(e); });
+      };
+    };
+    var ordre = [];
+    api('cave.photos', { id: b.id }).then(function (p) {
+      ordre = [p.principale].concat(p.autres).filter(Boolean);
+      if (!ordre.length) return;
+      $('#galerie').innerHTML = ordre.length > 1 ? ordre.map(function (pid) {
+        return '<button class="gal-th" data-pid="' + esc(pid) + '" aria-label="Voir cette photo"><span class="spin"></span></button>'; }).join('') : '';
+      // Chargement une par une (chaque photo est lue depuis Google Drive)
+      return ordre.reduce(function (pr, pid) {
+        return pr.then(function () {
+          return api('cave.photo', { id: b.id, photo_id: pid }).then(function (src) {
+            imgs[pid] = src;
+            var th = $('#galerie [data-pid="' + pid + '"]');
+            if (th) { th.style.backgroundImage = 'url(' + src + ')'; th.innerHTML = ''; th.onclick = function () { afficher(pid); }; }
+            if (pid === b.photo_id && !choisie) afficher(pid);
+          }).catch(function () {});
+        });
+      }, Promise.resolve());
+    }).catch(function () {});
+
+    var file = $('#ph-file');
+    $('#ph-change').onclick = function () { mode = 'principale'; file.click(); };
+    if ($('#ph-add')) $('#ph-add').onclick = function () { mode = 'autre'; file.click(); };
+    file.onchange = function () {
+      var f = file.files[0]; if (!f) return;
+      var bt = mode === 'principale' ? $('#ph-change') : $('#ph-add'); busy(bt, true, 'Envoi…');
+      Promise.all([reduireImage(f, 1600, 0.85), reduireImage(f, 220, 0.7)]).then(function (im) {
+        return api('cave.ajouterPhoto', { id: b.id, photo: { base64: im[0].base64, mime: im[0].mime }, vignette: im[1].dataUrl, principale: mode === 'principale' });
+      }).then(function () { toast(mode === 'principale' ? 'Photo principale changée (l’ancienne reste dans la galerie)' : 'Photo ajoutée'); apres(); })
+        .catch(function (e) { busy(bt, false); fail(e); });
+    };
+  }
+
   /** Frise chronologique de garde. */
   function frise(b) {
     var des = num(b.boire_des), ad = num(b.apogee_debut), af = num(b.apogee_fin), av = num(b.boire_avant), mil = num(b.millesime);
     if (!des && !ad && !af && !av) {
       return '<p class="muted">Fenêtre de garde non renseignée' +
-        (/spiritueux|liqueur/i.test(b.type) ? ' — normal pour un spiritueux, qui n’évolue plus une fois en bouteille.' : '. Utilisez « Compléter avec l’IA » ou modifiez la fiche.') + '</p>';
+        (/spiritueux|liqueur/i.test(b.type) ? ' : normal pour un spiritueux, qui n’évolue plus une fois en bouteille.' : '. Utilisez « Compléter avec l’IA » ou modifiez la fiche.') + '</p>';
     }
     var debut = Math.min.apply(null, [mil || des || ad, des || ad, ANNEE].filter(Boolean)) - 1;
     var fin = Math.max.apply(null, [av, af, ANNEE].filter(Boolean)) + 1;
@@ -737,14 +1548,15 @@
     nom: 'Cuvée / nom', domaine: 'Domaine / Maison', type: 'Type', couleur: 'Couleur', appellation: 'Appellation',
     region: 'Région', pays: 'Pays', millesime: 'Millésime', cepages: 'Cépages', degre: 'Degré (%)', contenance_cl: 'Contenance (cl)',
     emplacement: 'Emplacement', description: 'Description', aromes_nez: 'Arômes au nez', aromes_bouche: 'En bouche',
-    temp_service: 'Température de service', carafage: 'Carafage', boire_des: 'Buvable dès', apogee_debut: 'Apogée — début',
-    apogee_fin: 'Apogée — fin', boire_avant: 'À boire avant', accords: 'Accords mets', cote_unitaire: 'Cote estimée (€/btl)',
-    cote_commentaire: 'Commentaire cote', note_perso: 'Ma note (/20)', notes_perso: 'Mes notes de dégustation'
+    temp_service: 'Température de service', carafage: 'Carafage', boire_des: 'Buvable dès', apogee_debut: 'Apogée (début)',
+    apogee_fin: 'Apogée (fin)', boire_avant: 'À boire avant', accords: 'Accords mets', cote_unitaire: 'Cote estimée (€/btl)',
+    cote_commentaire: 'Commentaire cote', note_perso: 'Ma note (/20)', notes_perso: 'Mes notes de dégustation',
+    categorie: 'Catégorie (spiritueux)'
   };
   var SECTIONS = [
-    ['Identité', ['domaine', 'nom', 'type', 'couleur', 'appellation', 'region', 'pays', 'millesime', 'cepages', 'degre', 'contenance_cl', 'emplacement']],
+    ['Identité', ['domaine', 'nom', 'type', 'categorie', 'couleur', 'appellation', 'region', 'pays', 'millesime', 'cepages', 'degre', 'contenance_cl', 'emplacement']],
     ['Quand la boire', ['boire_des', 'apogee_debut', 'apogee_fin', 'boire_avant']],
-    ['Dégustation & service', ['description', 'aromes_nez', 'aromes_bouche', 'temp_service', 'carafage', 'accords']],
+    ['Dégustation et service', ['description', 'aromes_nez', 'aromes_bouche', 'temp_service', 'carafage', 'accords']],
     ['Valeur', ['cote_unitaire', 'cote_commentaire']],
     ['Mes notes', ['note_perso', 'notes_perso']]
   ];
@@ -756,7 +1568,8 @@
     var attrs = 'id="v-' + c + '" name="' + c + '"';
     var html;
     if (c === 'type') html = '<select ' + attrs + '>' + options(TYPES, val || 'Vin') + '</select>';
-    else if (c === 'couleur') html = '<select ' + attrs + '>' + options(COULEURS, val, '—') + '</select>';
+    else if (c === 'categorie') html = '<select ' + attrs + '>' + options(CATEGORIES_SPIRITUEUX, val, '-') + '</select>';
+    else if (c === 'couleur') html = '<select ' + attrs + '>' + options(COULEURS, val, '-') + '</select>';
     else if (LONGS.indexOf(c) > -1) html = '<textarea ' + attrs + '>' + esc(val) + '</textarea>';
     else if (ANNEES.indexOf(c) > -1) html = '<input ' + attrs + ' type="number" min="1800" max="2200" value="' + esc(val) + '">';
     else if (['degre', 'contenance_cl', 'cote_unitaire', 'note_perso'].indexOf(c) > -1)
@@ -790,8 +1603,12 @@
         '<div class="grid" style="grid-template-columns:minmax(0,340px) minmax(0,1fr);align-items:start" id="f-grid">' +
           '<div>' +
             '<div class="drop" id="drop" tabindex="0" role="button" aria-label="Prendre ou choisir une photo">' +
-              '<div id="drop-in"><div style="font-size:2.4rem">📷</div><strong>Photographier l’étiquette ou la caisse</strong>' +
-              '<p class="muted small">ou glisser une image ici. L’IA lit l’étiquette (ou le marquage de la caisse, quantité comprise) et pré-remplit la fiche.</p></div>' +
+              '<div id="drop-in">' + (edition
+                ? ((cache.vign || {})[id] ? '<img src="' + (cache.vign || {})[id] + '" alt="Photo actuelle" style="max-height:140px">' : '<div style="font-size:2.4rem">📷</div>') +
+                  '<strong style="display:block">' + (b.photo_id ? 'Changer la photo principale' : 'Ajouter une photo') + '</strong>' +
+                  '<p class="muted small">' + (b.photo_id ? 'L’ancienne photo reste dans la galerie de la fiche. ' : '') + 'Aucune analyse IA automatique : utilisez « Analyser la photo » si besoin.</p>'
+                : '<div style="font-size:2.4rem">📷</div><strong>Photographier l’étiquette ou la caisse</strong>' +
+                  '<p class="muted small">ou glisser une image ici. L’IA lit l’étiquette (ou le marquage de la caisse, quantité comprise) et pré-remplit la fiche.</p>') + '</div>' +
               '<input type="file" id="file" accept="image/*" capture="environment" hidden>' +
             '</div>' +
             '<div style="margin-top:10px"><label for="indice">Précision pour l’IA (facultatif)</label>' +
@@ -822,6 +1639,17 @@
         '</div>';
 
       if (window.matchMedia('(max-width: 820px)').matches) $('#f-grid').style.gridTemplateColumns = '1fr';
+      var majCategorie = function () {
+        var spirit = /spiritueux|liqueur/i.test($('#v-type').value);
+        $('#v-categorie').parentNode.hidden = !spirit;
+        if (spirit && !$('#v-categorie').value) {
+          var g = devinerCategorie({ nom: $('#v-nom').value, domaine: $('#v-domaine').value, appellation: $('#v-appellation').value });
+          if (g) $('#v-categorie').value = g;
+        }
+      };
+      $('#v-type').addEventListener('change', majCategorie);
+      ['v-nom', 'v-domaine'].forEach(function (i) { $('#' + i).addEventListener('change', majCategorie); });
+      majCategorie();
 
       var drop = $('#drop'), file = $('#file');
       drop.onclick = function () { file.click(); };
@@ -834,9 +1662,10 @@
       function prendre(f) {
         Promise.all([reduireImage(f, 1600, 0.85), reduireImage(f, 220, 0.7)]).then(function (imgs) {
           photo = imgs[0]; vignette = imgs[1].dataUrl;
-          $('#drop-in').innerHTML = '<img src="' + photo.dataUrl + '" alt="Étiquette"><p class="small muted">Cliquer pour changer</p>';
+          $('#drop-in').innerHTML = '<img src="' + photo.dataUrl + '" alt="Étiquette"><p class="small muted">' +
+            (edition ? 'Nouvelle photo principale : enregistrez la fiche pour la garder.' : 'Cliquer pour changer') + '</p>';
           $('#b-ocr').disabled = false;
-          $('#b-ocr').click();
+          if (!edition) $('#b-ocr').click();   // en modification, pas d'appel IA automatique
         }).catch(function () { toast('Image illisible', true); });
       }
 
@@ -910,7 +1739,7 @@
             ['domaine', 'nom', 'contenance_cl', 'type', 'couleur'].forEach(function (c) {
               var el = $('#v-' + c); if (el && libre(el) && p[c]) { el.value = p[c]; el.style.background = 'rgba(176,138,62,.12)'; }
             });
-            $('#ean-info').innerHTML = '▥ ' + esc(code) + ' : trouvé sur Open Food Facts (' + esc([p.domaine, p.nom].filter(Boolean).join(' — ')) + '), sans IA. Vérifiez, puis « Compléter sans photo » si vous voulez la fiche détaillée.';
+            $('#ean-info').innerHTML = '▥ ' + esc(code) + ' : trouvé sur Open Food Facts (' + esc([p.domaine, p.nom].filter(Boolean).join(' · ')) + '), sans IA. Vérifiez, puis « Compléter sans photo » si vous voulez la fiche détaillée.';
             majDoublons();
           });
         });
@@ -932,6 +1761,7 @@
           (r.texte_lu ? '<details style="margin-top:6px"><summary>Texte lu sur l’étiquette</summary><p class="small" style="white-space:pre-wrap">' + esc(r.texte_lu) + '</p></details>' : '') +
           (r.cote_commentaire ? '<p class="small" style="margin:6px 0 0">Cote : ' + esc(r.cote_commentaire) + '</p>' : '') + '</div>';
         if (r.cote_unitaire) $('#f-vin').dataset.coteIa = '1';
+        majCategorie();
         majDoublons();
         var qv = num(r.quantite_visible);
         if (qv > 0 && !edition && $('[name=_quantite]')) {
@@ -1130,7 +1960,8 @@
   /** Fiche à compléter : pas d'accords, pas d'arômes, ou pas de garde pour un vin. */
   function ficheIncomplete(v) {
     var spirit = /spiritueux|liqueur|bière/i.test(v.type || '');
-    return !v.accords || !v.aromes_nez || (!spirit && !num(v.boire_avant) && !num(v.apogee_fin));
+    return !v.accords || !v.aromes_nez || (!spirit && !num(v.boire_avant) && !num(v.apogee_fin)) ||
+      (estSpiritueux(v) && !v.categorie && !devinerCategorie(v));
   }
 
   /** Complète des fiches en lot : 15 par requête, champs vides uniquement. */
@@ -1180,7 +2011,7 @@
   function descDoublon(x) {
     return esc(libelle(x)) + (x.millesime ? ' ' + esc(x.millesime) : '') +
       (num(x.contenance_cl) && num(x.contenance_cl) !== 75 ? ' (' + esc(x.contenance_cl) + ' cl)' : '') +
-      ' — <strong>' + (x.stock || 0) + ' btl</strong>' + (x.emplacement ? ' · 📍 ' + esc(x.emplacement) : '');
+      ' : <strong>' + (x.stock || 0) + ' btl</strong>' + (x.emplacement ? ' · 📍 ' + esc(x.emplacement) : '');
   }
   function htmlDoublons(d) {
     if (!d.exact.length && !d.proches.length) return '';
@@ -1194,16 +2025,18 @@
   }
 
   /** Redimensionne une image côté navigateur (JPEG). Gère l'orientation EXIF des navigateurs récents. */
-  function reduireImage(file, max, qualite) {
+  function reduireImage(file, max, qualite) { return reduireSource(file, max, qualite); }
+  function reduireSource(source, max, qualite) {
     return new Promise(function (ok, ko) {
-      var url = URL.createObjectURL(file);
+      var estFichier = typeof source !== 'string';
+      var url = estFichier ? URL.createObjectURL(source) : source;
       var img = new Image();
       img.onload = function () {
         var s = Math.min(1, max / Math.max(img.naturalWidth, img.naturalHeight));
         var c = document.createElement('canvas');
         c.width = Math.round(img.naturalWidth * s); c.height = Math.round(img.naturalHeight * s);
         c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
-        URL.revokeObjectURL(url);
+        if (estFichier) URL.revokeObjectURL(url);
         var dataUrl = c.toDataURL('image/jpeg', qualite);
         ok({ dataUrl: dataUrl, base64: dataUrl.split(',')[1], mime: 'image/jpeg' });
       };
@@ -1222,12 +2055,12 @@
       var cat = cats[0];
 
       v.innerHTML =
-        '<div class="head"><h1>Accords mets & vins</h1></div>' +
-        '<div class="card" style="margin-bottom:18px"><h2>Que boire ce soir ?</h2>' +
+        '<div class="head"><h1>Accords mets et vins</h1></div>' +
+        '<div class="card ia-only" style="margin-bottom:18px"><h2>Que boire ce soir ?</h2>' +
           '<p class="muted">Décrivez le plat : le sommelier IA choisit parmi <strong>vos</strong> bouteilles, en priorité celles à leur apogée.</p>' +
           '<form class="row" id="f-som"><input name="plat" placeholder="ex. magret de canard aux cerises, plateau de fromages de chèvre…" style="flex:1;min-width:220px" required>' +
           '<input name="contexte" placeholder="Occasion (facultatif)" style="max-width:220px">' +
-          '<button type="submit">Proposer</button></form><div id="som-res"></div></div>' +
+          '<button type="submit">Proposer</button></form><p class="small muted ia-restant" style="margin:6px 0 0">' + texteIaRestant() + '</p><div id="som-res"></div></div>' +
         '<a class="card ap-banner" href="#/apporter"><span class="qi">🎁</span><span><strong>J’apporte une bouteille</strong>' +
           '<span class="small muted" style="display:block">Chez des amis, en famille, pour un anniversaire : choisir dans la cave selon l’occasion, le budget, les convives et le plat.</span></span><span class="spacer"></span><span aria-hidden="true">→</span></a>' +
         '<h2>Guide des accords</h2><div class="cats" id="cats"></div><div class="grid g2" id="acc"></div>';
@@ -1242,7 +2075,7 @@
         $('#acc').innerHTML = accords.filter(function (a) { return a.categorie === cat; }).map(function (a) {
           var mots = splitList(a.mots_cles).map(norm), couleurs = splitList(a.couleurs);
           var dispo = vins.map(function (x) {
-            var hay = norm([x.appellation, x.region, x.cepages, x.nom, x.domaine, x.accords].join(' '));
+            var hay = norm([x.appellation, x.region, x.cepages, x.nom, x.domaine, x.accords, categorieDe(x)].join(' '));
             var score = mots.filter(function (m) { return m && hay.indexOf(m) > -1; }).length * 2 +
               (couleurs.indexOf(x.couleur) > -1 ? 1 : 0) +
               (norm(x.accords).indexOf(norm(a.plat).split(/[ (,]/)[0]) > -1 ? 2 : 0) +
@@ -1258,7 +2091,7 @@
               return '<div class="row small" style="gap:6px;margin:3px 0">' + dot(o.x.couleur) + '<a href="#/bouteille/' + esc(o.x.id) + '">' +
                 esc(libelle(o.x)) + (o.x.millesime ? ' ' + esc(o.x.millesime) : '') + '</a>' +
                 '<strong class="nb">' + o.x.stock + ' btl</strong>' + pillMat(o.x.maturite) + '</div>';
-            }).join('') : '<p class="small muted" style="margin:0">Rien de correspondant — une idée pour la <a href="#/prospection">prospection</a>.</p>') +
+            }).join('') : '<p class="small muted" style="margin:0">Rien de correspondant : une idée pour la <a href="#/prospection">prospection</a>.</p>') +
             '</div>';
         }).join('');
       }
@@ -1325,10 +2158,10 @@
     modal('<h2>' + (p.id ? 'Modifier' : 'Nouveau repérage') + '</h2><form class="form" id="f-p">' +
       f('domaine', 'Domaine / Maison') + f('nom', 'Cuvée') +
       '<div><label>Type</label><select name="type">' + options(TYPES, p.type || 'Vin') + '</select></div>' +
-      '<div><label>Couleur</label><select name="couleur">' + options(COULEURS, p.couleur, '—') + '</select></div>' +
+      '<div><label>Couleur</label><select name="couleur">' + options(COULEURS, p.couleur, '-') + '</select></div>' +
       f('appellation', 'Appellation') + f('millesime', 'Millésime', 'number') + f('prix_vu', 'Prix vu (€)', 'number', ' step="0.01"') +
       f('lieu', 'Où (caviste, salon, site…)') +
-      '<div><label>Origine</label><select name="origine">' + options(Object.keys(ORIGINES).map(function (k) { return [k, ORIGINES[k]]; }), p.origine, '—') + '</select></div>' +
+      '<div><label>Origine</label><select name="origine">' + options(Object.keys(ORIGINES).map(function (k) { return [k, ORIGINES[k]]; }), p.origine, '-') + '</select></div>' +
       f('date_vue', 'Date', 'date') + f('note_perso', 'Ma note (/20)', 'number', ' step="0.5" min="0" max="20"') +
       '<div><label>Priorité</label><select name="priorite">' + options([['1', '★'], ['2', '★★'], ['3', '★★★']], p.priorite || '2') + '</select></div>' +
       '<div><label>Statut</label><select name="statut">' + options(Object.keys(STATUTS_PROSP).map(function (k) { return [k, STATUTS_PROSP[k]]; }), p.statut || 'repere') + '</select></div>' +
@@ -1364,7 +2197,7 @@
         return k.map(function (c) {
           return '<div class="hbar"><span>' + esc(c) + '</span><div class="track"><div class="fill" style="width:' + Math.round(obj[c].valeur / max * 100) +
             '%"></div></div><span class="n small">' + eur(obj[c].valeur) + '<br><span class="muted">' + obj[c].bouteilles + ' btl</span></span></div>';
-        }).join('') || '<p class="muted">—</p>';
+        }).join('') || '<p class="muted">-</p>';
       };
 
       v.innerHTML = '<div class="head"><h1>Valeur de la cave</h1><span class="spacer"></span>' +
@@ -1374,7 +2207,7 @@
         '<div class="grid g3" style="grid-template-columns:repeat(auto-fit,minmax(170px,1fr))">' +
           stat(eur(s.valeur_estimee), 'valeur estimée', pv !== null ? '<span class="' + (pv >= 0 ? 'up' : 'down') + '">' + (pv >= 0 ? '+' : '') + pv + ' % vs achat</span>' : '') +
           stat(eur(s.valeur_achat), 'valeur d’achat') +
-          stat(s.nb_bouteilles ? eur(s.valeur_estimee / s.nb_bouteilles) : '—', 'valeur moyenne / bouteille') +
+          stat(s.nb_bouteilles ? eur(s.valeur_estimee / s.nb_bouteilles) : '-', 'valeur moyenne / bouteille') +
           stat(s.sans_cote, 'références sans cote', 'valorisées au prix d’achat') +
         '</div>' +
         '<div class="card chart" style="margin-top:16px"><h2>Évolution</h2>' + courbe(h) +
@@ -1386,7 +2219,7 @@
           s.top.map(function (t) {
             return '<tr><td><a href="#/bouteille/' + esc(t.id) + '">' + esc(t.libelle) + '</a></td><td class="n">' + t.stock + '</td>' +
               '<td class="n">' + eur(t.prix_moyen, true) + '</td><td class="n">' + eur(t.cote, true) + '</td>' +
-              '<td class="n ' + (t.plus_value > 0 ? 'up' : t.plus_value < 0 ? 'down' : '') + '">' + (t.plus_value === null ? '—' : (t.plus_value > 0 ? '+' : '') + t.plus_value + ' %') + '</td>' +
+              '<td class="n ' + (t.plus_value > 0 ? 'up' : t.plus_value < 0 ? 'down' : '') + '">' + (t.plus_value === null ? '-' : (t.plus_value > 0 ? '+' : '') + t.plus_value + ' %') + '</td>' +
               '<td class="n"><strong>' + eur(t.valeur) + '</strong></td><td class="small muted">' + (t.cote_date ? dateFr(t.cote_date) + (t.cote_source === 'ia' ? ' · IA' : '') : '') + '</td></tr>';
           }).join('') + '</tbody></table></div>' +
           '<p class="small muted">Les cotes IA sont des estimations indicatives, à recouper avant toute revente ou déclaration d’assurance.</p></div>';
@@ -1537,7 +2370,7 @@
               return api('ia.reconnaitre', { base64: img.base64, mime: img.mime });
             }).then(function (res) {
               var c = res.correspondances || [];
-              $('#s-res', root).innerHTML = '<p class="small muted" style="margin:6px 0">Lu : ' + esc(res.lu || '—') + '</p>' +
+              $('#s-res', root).innerHTML = '<p class="small muted" style="margin:6px 0">Lu : ' + esc(res.lu || '-') + '</p>' +
                 (c.length ? c.map(function (x) {
                   var b = vins.filter(function (v) { return v.id === x.id; })[0];
                   return b ? ligne(b, ' · certitude ' + esc(x.certitude || '?')) : '';
@@ -1619,7 +2452,7 @@
         '<div><label for="me-nom">Cuvée</label><input id="me-nom" name="nom"></div>' +
         '<div><label for="me-app">Appellation</label><input id="me-app" name="appellation"></div>' +
         '<div><label for="me-mil">Millésime</label><input id="me-mil" name="millesime" type="number" min="1800" max="2200"></div>' +
-        '<div><label for="me-cou">Couleur</label><select id="me-cou" name="couleur">' + options(COULEURS, '', '—') + '</select></div>' +
+        '<div><label for="me-cou">Couleur</label><select id="me-cou" name="couleur">' + options(COULEURS, '', '-') + '</select></div>' +
         '<div><label for="me-typ">Type</label><select id="me-typ" name="type">' + options(TYPES, 'Vin') + '</select></div>' +
         '<div><label for="me-ori">Pourquoi</label><select id="me-ori" name="origine">' + options(Object.keys(ORIGINES).map(function (k) { return [k, ORIGINES[k]]; }), 'restaurant') + '</select></div>' +
         '<div><label for="me-lieu">Où</label><input id="me-lieu" name="lieu" placeholder="Restaurant, ami, salon…"></div>' +
@@ -1800,7 +2633,7 @@
             '<div class="thumb" style="' + (img ? 'background-image:url(' + img + ')' : '') + '">' + (img ? '' : esc((b.domaine || '?')[0])) + '</div>' +
             '<div style="min-width:0;flex:1">' + (rang === 0 ? '<div class="eyebrow">Notre choix</div>' : '') +
               '<a href="#/bouteille/' + esc(b.id) + '" class="t">' + esc(libelle(b)) + (b.millesime ? ' ' + esc(b.millesime) : '') + '</a>' +
-              '<div class="small muted">' + dot(b.couleur) + ' ' + esc([b.appellation || b.type, b.emplacement ? '📍 ' + b.emplacement : ''].filter(Boolean).join(' · ')) + '</div>' +
+              '<div class="small muted">' + dot(b.couleur) + ' ' + esc([sousTitre(b), b.emplacement ? '📍 ' + b.emplacement : ''].filter(Boolean).join(' · ')) + '</div>' +
               '<div class="row" style="gap:6px;margin-top:6px">' + pillMat(b.maturite) + '<strong class="nb">' + b.stock + ' btl en cave</strong>' +
                 (o.besoin > 1 ? '<span class="tag">en prendre ' + o.besoin + '</span>' : '') + '</div>' +
               '<ul class="why">' + o.pour.map(function (x) { return '<li class="ok">' + esc(x) + '</li>'; }).join('') +
@@ -1824,7 +2657,7 @@
         $$('[data-prendre]').forEach(function (btn) {
           btn.onclick = function () {
             var b = vins.filter(function (x) { return x.id === btn.getAttribute('data-prendre'); })[0];
-            formulaireSortie(b, 'offert', { occasion: (c.hote ? 'Apportée chez ' + c.hote : 'Apportée') + ' — ' + libOcc().toLowerCase(), quantite: btn.getAttribute('data-q') });
+            formulaireSortie(b, 'offert', { occasion: (c.hote ? 'Apportée chez ' + c.hote : 'Apportée') + ', ' + libOcc().toLowerCase(), quantite: btn.getAttribute('data-q') });
           };
         });
         if ($('#ap-ia')) $('#ap-ia').onclick = function () {
@@ -1851,13 +2684,13 @@
   /* =========================================================
    * Import d'un tableau sans IA (sortie de ChatGPT / Claude, copie d'Excel, CSV, JSON)
    * ======================================================= */
-  var COLONNES_IMPORT = ['domaine', 'cuvee', 'type', 'couleur', 'appellation', 'region', 'pays', 'millesime', 'cepages', 'degre',
+  var COLONNES_IMPORT = ['domaine', 'cuvee', 'type', 'categorie', 'couleur', 'appellation', 'region', 'pays', 'millesime', 'cepages', 'degre',
     'contenance_cl', 'quantite', 'emplacement', 'prix_achat', 'boire_des', 'apogee_debut', 'apogee_fin', 'boire_avant',
     'temp_service', 'carafage', 'accords', 'aromes_nez', 'aromes_bouche', 'description', 'cote_estimee'];
   // Variantes d'en-têtes acceptées → champ de la fiche
   var ALIAS_IMPORT = {
     domaine: 'domaine', producteur: 'domaine', chateau: 'domaine', maison: 'domaine',
-    cuvee: 'nom', nom: 'nom', vin: 'nom', type: 'type', couleur: 'couleur', appellation: 'appellation', aoc: 'appellation',
+    cuvee: 'nom', nom: 'nom', vin: 'nom', type: 'type', categorie: 'categorie', soustype: 'categorie', famille: 'categorie', couleur: 'couleur', appellation: 'appellation', aoc: 'appellation',
     region: 'region', pays: 'pays', millesime: 'millesime', annee: 'millesime', vintage: 'millesime', cepages: 'cepages', cepage: 'cepages',
     degre: 'degre', alcool: 'degre', contenancecl: 'contenance_cl', contenance: 'contenance_cl', format: 'contenance_cl', cl: 'contenance_cl',
     quantite: '_quantite', qte: '_quantite', nombre: '_quantite', nb: '_quantite', bouteilles: '_quantite', stock: '_quantite',
@@ -1875,6 +2708,7 @@
     COLONNES_IMPORT.join(';') + '\n\n' +
     'Règles :\n' +
     '- type parmi : Vin, Champagne, Crémant, Spiritueux, Liqueur, Bière, Autre\n' +
+    '- categorie (seulement pour un spiritueux ou une liqueur) parmi : ' + CATEGORIES_SPIRITUEUX.join(', ') + '\n' +
     '- couleur parmi : Rouge, Blanc, Rosé, Effervescent, Liquoreux, Moelleux, Ambré, Incolore\n' +
     '- millesime et années de garde sur 4 chiffres ; garde vide pour un spiritueux\n' +
     '- quantite = nombre de bouteilles identiques ; contenance_cl = 75 par défaut (70 pour un spiritueux)\n' +
@@ -1949,7 +2783,7 @@
         '<div class="head"><h1>Saisie en série</h1><span class="muted">Pour rentrer beaucoup de bouteilles d’un coup : une photo par référence, ou une liste collée.</span></div>' +
         '<datalist id="dl-serie">' + lieux.map(function (x) { return '<option value="' + esc(x) + '">'; }).join('') + '</datalist>' +
         '<div class="card" style="margin-bottom:14px"><div class="form">' +
-          '<div><label for="se-emp">Emplacement par défaut</label><input id="se-emp" list="dl-serie" value="' + esc(R.emplacement) + '" placeholder="ex. Cave — casier A1"></div>' +
+          '<div><label for="se-emp">Emplacement par défaut</label><input id="se-emp" list="dl-serie" value="' + esc(R.emplacement) + '" placeholder="ex. Cave, casier A1"></div>' +
           '<div><label for="se-ent">Entrée</label><select id="se-ent">' + options([['initial', 'Stock initial (déjà en cave)'], ['achat', 'Achat'], ['cadeau_recu', 'Cadeau reçu']], R.entree) + '</select></div>' +
           '<div><label for="se-ana">Analyse des photos</label><select id="se-ana">' + options([['rapide', 'Rapide : identification, détails complétés en lot'], ['complete', 'Complète : fiche détaillée pour chaque photo']], R.analyse || 'rapide') + '</select></div>' +
           '<div class="se-achat"><label for="se-date">Date d’achat</label><input id="se-date" type="date" value="' + esc(R.date || today()) + '"></div>' +
@@ -1973,7 +2807,7 @@
           '<div class="row" style="margin-top:8px"><span class="small muted" style="flex:1">Import immédiat, sans appel à l’IA. Les fiches restent modifiables avant enregistrement.</span><button id="se-imp">Importer le tableau</button></div></div>' +
         '<div id="se-liste" class="card" style="margin-bottom:14px" hidden>' +
           '<label for="se-txt">Une bouteille par ligne (copiée d’Excel, d’un carnet, d’un mail…)</label>' +
-          '<textarea id="se-txt" style="min-height:160px" placeholder="6 x Château Talbot 2015&#10;Bollinger Special Cuvée — 3 btl — cave haute&#10;Armagnac Darroze 20 ans, 1, 95 €"></textarea>' +
+          '<textarea id="se-txt" style="min-height:160px" placeholder="6 x Château Talbot 2015&#10;Bollinger Special Cuvée, 3 btl, cave haute&#10;Armagnac Darroze 20 ans, 1, 95 €"></textarea>' +
           '<div class="row" style="margin-top:8px"><span class="small muted" style="flex:1">Jusqu’à environ 80 lignes par envoi. Quantité, emplacement et prix sont repris s’ils figurent sur la ligne.</span><button id="se-go">✨ Analyser la liste</button></div></div>' +
         '<div id="se-list" class="se-list"></div>' +
         '<div class="se-bar" id="se-bar" hidden></div>';
@@ -2225,7 +3059,7 @@
               b.statut === 'erreur' ? '' :
               '<div class="form se-form">' +
                 champ('domaine', 'Domaine') + champ('nom', 'Cuvée') + champ('millesime', 'Millésime', ' type="number" min="1800" max="2200"') +
-                '<div><label>Couleur</label><select data-k="' + b.k + '" data-c="couleur"' + (fini ? ' disabled' : '') + '>' + options(COULEURS, f.couleur, '—') + '</select></div>' +
+                '<div><label>Couleur</label><select data-k="' + b.k + '" data-c="couleur"' + (fini ? ' disabled' : '') + '>' + options(COULEURS, f.couleur, '-') + '</select></div>' +
                 champ('appellation', 'Appellation') +
                 '<div><label>Quantité</label><input data-k="' + b.k + '" data-q="quantite" type="number" min="1" value="' + esc(b.quantite) + '"' + (fini ? ' disabled' : '') + '></div>' +
                 '<div><label>Emplacement</label><input data-k="' + b.k + '" data-q="emplacement" list="dl-serie" value="' + esc(b.emplacement) + '"' + (fini ? ' disabled' : '') + '></div>' +
@@ -2343,8 +3177,8 @@
         var ailleurs = l.filter(function (x) { return x.source !== 'cave'; }).length;
         var top = notes.slice().sort(function (a, b) { return b.note - a.note; })[0];
         $('#dg-stats').innerHTML = stat(cave, 'bouteilles de ma cave') + stat(ailleurs, 'bues ailleurs') +
-          stat(notes.length ? (notes.reduce(function (s, x) { return s + x.note; }, 0) / notes.length).toFixed(1) + '<small style="font-size:1rem">/20</small>' : '—', 'note moyenne', notes.length + ' notée' + (notes.length > 1 ? 's' : '')) +
-          stat(top ? top.note + '<small style="font-size:1rem">/20</small>' : '—', 'meilleure note', top ? esc(top.titre) : '');
+          stat(notes.length ? (notes.reduce(function (s, x) { return s + x.note; }, 0) / notes.length).toFixed(1) + '<small style="font-size:1rem">/20</small>' : '-', 'note moyenne', notes.length + ' notée' + (notes.length > 1 ? 's' : '')) +
+          stat(top ? top.note + '<small style="font-size:1rem">/20</small>' : '-', 'meilleure note', top ? esc(top.titre) : '');
 
         var mois = '', html = '';
         l.forEach(function (x) {
@@ -2439,7 +3273,7 @@
           '<div class="row" style="gap:10px;flex-wrap:nowrap;align-items:flex-start">' +
             '<div class="thumb" style="width:46px;height:64px;' + (img ? 'background-image:url(' + img + ')' : '') + '">' + (img ? '' : esc((b.domaine || '?')[0])) + '</div>' +
             '<div style="min-width:0"><a class="t" href="#/bouteille/' + esc(b.id) + '">' + esc(libelle(b)) + (b.millesime ? ' ' + esc(b.millesime) : '') + '</a>' +
-            '<div class="small muted">' + dot(b.couleur) + ' ' + esc([b.appellation || b.type, b.emplacement ? '📍 ' + b.emplacement : ''].filter(Boolean).join(' · ')) + '</div>' +
+            '<div class="small muted">' + dot(b.couleur) + ' ' + esc([sousTitre(b), b.emplacement ? '📍 ' + b.emplacement : ''].filter(Boolean).join(' · ')) + '</div>' +
             '<div class="small" style="margin-top:4px">' + esc(raisonJour(b)) + ' · <strong>' + b.stock + ' btl</strong></div>' +
             (b.temp_service ? '<div class="small muted">Service ' + esc(b.temp_service) + (b.carafage && b.carafage !== 'inutile' ? ', carafe ' + esc(b.carafage) : '') + '</div>' : '') +
           '</div></div>' +
@@ -2474,7 +3308,7 @@
     document.body.appendChild(a); a.click(); a.remove();
     setTimeout(function () { URL.revokeObjectURL(a.href); }, 2000);
   }
-  var COLS_CAVE = [['id', 'Référence'], ['domaine', 'Domaine'], ['nom', 'Cuvée'], ['type', 'Type'], ['couleur', 'Couleur'],
+  var COLS_CAVE = [['id', 'Référence'], ['domaine', 'Domaine'], ['nom', 'Cuvée'], ['type', 'Type'], [function (v) { return categorieDe(v); }, 'Catégorie'], ['couleur', 'Couleur'],
     ['appellation', 'Appellation'], ['region', 'Région'], ['pays', 'Pays'], ['millesime', 'Millésime'], ['cepages', 'Cépages'],
     ['degre', 'Degré'], ['contenance_cl', 'Contenance (cl)'], ['stock', 'Stock'], ['niveau_entamee', 'Entamée (%)'], ['emplacement', 'Emplacement'],
     ['prix_moyen', 'Prix moyen d’achat (€)'], ['cote_unitaire', 'Cote (€)'], ['cote_date', 'Date de cote'],
@@ -2545,7 +3379,7 @@
             '<td class="n">' + eur(num(x.prix_moyen), true) + '</td><td class="n">' + eur(num(x.cote_unitaire), true) + '</td><td class="n">' + eur(valeur(x)) + '</td></tr>';
         }).join('');
         totB += sb; totV += sv;
-        return '<h3>📍 ' + esc(k) + ' <span class="small muted">— ' + sb + ' btl · ' + eur(sv) + '</span></h3>' +
+        return '<h3>📍 ' + esc(k) + ' <span class="small muted">· ' + sb + ' btl · ' + eur(sv) + '</span></h3>' +
           '<div class="table-wrap"><table class="inv"><thead><tr><th>Bouteille</th><th>Appellation</th><th>Mill.</th><th>Couleur</th><th class="n">cl</th><th class="n">Qté</th>' +
           '<th class="n">Achat</th><th class="n">Cote</th><th class="n">Valeur</th></tr></thead><tbody>' + rows + '</tbody></table></div>';
       }).join('');
@@ -2579,7 +3413,7 @@
     else root.removeAttribute('data-theme');
     var cur = THEMES.filter(function (x) { return x[0] === t; })[0] || THEMES[0];
     var b = $('#btn-theme');
-    if (b) { b.innerHTML = ICO[cur[0]] + '<span class="th-l">' + cur[1] + '</span>'; b.title = cur[2] + ' — cliquer pour changer'; b.setAttribute('aria-label', cur[2]); }
+    if (b) { b.innerHTML = ICO[cur[0]] + '<span class="th-l">' + cur[1] + '</span>'; b.title = cur[2] + ' (cliquer pour changer)'; b.setAttribute('aria-label', cur[2]); }
   }
   var theme = 'auto';
   try { theme = localStorage.getItem('cave_theme') || 'auto'; } catch (e) {}
@@ -2708,8 +3542,8 @@
                 (enCave(x) ? ' <span class="tag">déjà en cave</span>' : '') +
                 '<div class="small muted">' + esc([x.etat, x.commentaire].filter(Boolean).join(' · ')) + '</div></td>' +
               '<td>' + pillVerdict(x.verdict) + (x.a_boire ? '<div class="small muted" style="margin-top:4px">' + esc(x.a_boire) + '</div>' : '') + '</td>' +
-              '<td class="n">' + eur(x.prix_unitaire, true) + '</td><td class="n">' + (x.prix_marche ? eur(x.prix_marche) : '—') + '</td>' +
-              '<td class="n ' + (x.ecart < 0 ? 'up' : x.ecart > 0 ? 'down' : '') + '">' + (x.ecart === null ? '—' : (x.ecart > 0 ? '+' : '') + x.ecart + ' %') + '</td>' +
+              '<td class="n">' + eur(x.prix_unitaire, true) + '</td><td class="n">' + (x.prix_marche ? eur(x.prix_marche) : '-') + '</td>' +
+              '<td class="n ' + (x.ecart < 0 ? 'up' : x.ecart > 0 ? 'down' : '') + '">' + (x.ecart === null ? '-' : (x.ecart > 0 ? '+' : '') + x.ecart + ' %') + '</td>' +
               '<td class="n">' + eur(rendu, true) + '</td></tr>';
           }).join('') : '<tr><td colspan="7" class="empty">' + (filtre === 'panier' ? 'Panier vide : indiquez une quantité sur les lignes qui vous intéressent.' : 'Aucun article.') + '</td></tr>') + '</tbody>';
         $$('#o-table input[data-n]').forEach(function (i) {
