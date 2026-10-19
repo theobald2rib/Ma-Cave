@@ -398,3 +398,75 @@ table.inv th, table.inv td { padding: 5px 6px; }
 .scan-zone { position: relative; width: 100%; aspect-ratio: 4 / 3; max-height: 50vh; background: #000; border-radius: 10px; overflow: hidden; }
 .scan-zone video { width: 100%; height: 100%; object-fit: cover; display: block; }
 .scan-viseur { position: absolute; left: 12%; right: 12%; top: 35%; bottom: 35%; border: 2px solid rgba(255,255,255,.85); border-radius: 8px; box-shadow: 0 0 0 999px rgba(0,0,0,.25); }
+
+/* ---------- Liens de maturité, filtres actifs ---------- */
+a.hbar-link { color: inherit; text-decoration: none; border-radius: 8px; padding: 3px 6px; margin: 3px -6px; }
+a.hbar-link:hover { background: var(--bg); }
+a.h-link { color: inherit; text-decoration: none; }
+a.h-link:hover { color: var(--wine); }
+.chip-on { background: var(--wine); color: var(--on-wine); border: 0; border-radius: 999px; padding: 4px 12px; font-size: .85rem; font-weight: 600; }
+
+/* ---------- Galerie de photos ---------- */
+.galerie { display: flex; gap: 6px; flex-wrap: wrap; justify-content: center; margin-top: 8px; }
+.gal-th { width: 52px; height: 52px; padding: 0 !important; border-radius: 8px; border: 2px solid var(--line); background: var(--line) center/cover no-repeat; justify-content: center; }
+.gal-th.on { border-color: var(--wine); }
+
+/* ---------- Sélection multiple ---------- */
+.bottle { position: relative; }
+.sel-box { display: none; position: absolute; top: 8px; left: 8px; z-index: 2; width: 22px; height: 22px; border-radius: 6px;
+  border: 2px solid var(--muted); background: var(--paper); }
+.mode-sel .sel-box { display: block; }
+.mode-sel .bottle { cursor: pointer; }
+.mode-sel .bottle.choisie { outline: 2px solid var(--wine); outline-offset: -2px; }
+.mode-sel .bottle.choisie .sel-box { background: var(--wine); border-color: var(--wine); }
+.mode-sel .bottle.choisie .sel-box::after { content: "✓"; color: var(--on-wine); font-weight: 700; font-size: 14px; display: block; text-align: center; line-height: 18px; }
+.sel-td { display: none; width: 34px; }
+.mode-sel .sel-td { display: table-cell; }
+.rev-list { display: grid; gap: 8px; max-height: 55vh; overflow-y: auto; }
+.rev-item { background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; }
+.rev-ch { margin: 6px 0 0; padding-left: 28px; font-size: .85rem; display: grid; gap: 2px; }
+.rev-ch s { text-decoration-color: var(--muted); }
+#liste.mode-sel { padding-bottom: 90px; }
+
+/* ---------- Visiteurs : actions masquées (le serveur refuse de toute façon) ---------- */
+body.visiteur .admin-only, body.sans-prix .prix-only,
+body.visiteur #fab, body.visiteur [data-quick], body.visiteur [data-ouvrir], body.visiteur [data-boire], body.visiteur [data-pas],
+body.visiteur [data-del-mvt], body.visiteur a[href^="#/ajouter"], body.visiteur a[href^="#/modifier"], body.visiteur a[href^="#/serie"],
+body.visiteur a[href^="#/apporter"], body.visiteur a[href^="#/journal"], body.visiteur a[href^="#/prospection"],
+body.visiteur a[href^="#/offres"], body.visiteur a[href^="#/inventaire"], body.visiteur a[href^="#/acces"],
+body.visiteur .photo-actions, body.visiteur #ph-sel, body.visiteur #b-boire, body.visiteur #b-achat, body.visiteur #b-sortie,
+body.visiteur #b-ajust, body.visiteur #b-archiver, body.visiteur #b-enrichir, body.visiteur #b-coter, body.visiteur .ent .row,
+body.visiteur .ent input, body.visiteur #sel-on, body.visiteur #sel-bar, body.visiteur #exp, body.visiteur #cave-compl,
+body.visiteur #cat-save, body.visiteur #v-snap, body.visiteur #v-cotes { display: none !important; }
+body.visiteur .cell-edit { border-color: transparent; background: transparent; pointer-events: none; }
+
+/* ---------- Accès ---------- */
+table.acces td { vertical-align: middle; }
+table.acces select { min-width: 150px; }
+table.acces tr.inactif td { opacity: .55; }
+.dup-box a.btn:not(.ghost) { color: var(--on-wine); }
+
+/* ---------- Échanges ---------- */
+.visiteur-only { display: none !important; }
+body.visiteur .visiteur-only { display: inline-flex !important; }
+.nav-badge { display: inline-block; min-width: 18px; height: 18px; padding: 0 5px; margin-left: 5px; border-radius: 9px; background: var(--wine); color: var(--on-wine);
+  font-size: .72rem; font-weight: 700; line-height: 18px; text-align: center; vertical-align: 2px; }
+.nav-badge[hidden] { display: none; }
+.ech { margin-bottom: 10px; }
+.ech .qi { font-size: 1.4rem; line-height: 1; }
+.ech .t { font-weight: 600; margin-top: 2px; overflow-wrap: anywhere; }
+.ech-new { border-color: var(--wine); box-shadow: inset 3px 0 0 var(--wine); }
+.ech-grid > div { min-width: 0; }
+.ech-grid h2 { margin: 0 0 10px; }
+ul.avis { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; }
+ul.avis li { border-bottom: 1px solid var(--line); padding-bottom: 8px; }
+ul.avis li:last-child { border-bottom: 0; }
+ul.avis p { margin: 4px 0 0; }
+.lien-suppr { padding: 0 6px; min-height: 0; line-height: 1.4; }
+.dest { display: grid; gap: 4px; }
+.dest label { font-weight: 500; color: var(--ink); margin: 0; }
+
+/* ---------- IA des visiteurs ---------- */
+body:not(.avec-ia) .ia-only { display: none !important; }
+.ia-visiteur-only { display: none !important; }
+body.visiteur.avec-ia .ia-visiteur-only { display: inline-flex !important; }
