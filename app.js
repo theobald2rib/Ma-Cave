@@ -234,7 +234,7 @@
     '': vueAccueil, cave: vueCave, bouteille: vueBouteille, ajouter: vueFormulaire, modifier: vueFormulaire,
     accords: vueAccords, apporter: vueApporter, serie: vueSerie, degustations: vueDegustations, inventaire: vueInventaire, offres: vueOffres, prospection: vueProspection, valeur: vueValeur, journal: vueJournal, acces: vueAcces, echanges: vueEchanges, analyser: vueAnalyser
   };
-  var ROUTES_ADMIN = ['ajouter', 'modifier', 'serie', 'apporter', 'inventaire', 'offres', 'prospection', 'journal', 'acces'];
+  var ROUTES_ADMIN = ['ajouter', 'modifier', 'serie', 'apporter', 'inventaire', 'prospection', 'journal', 'acces'];
 
   function route() {
     if (!session) return;
@@ -631,7 +631,7 @@
   /* =========================================================
    * Échanges : avis et envies des visiteurs, recommandations dans les deux sens
    * ======================================================= */
-  var TYPES_ECH = { avis: ['✍', 'Avis de dégustation'], envie: ['🙋', 'Aimerait la goûter'], reco: ['💡', 'Recommandation'] };
+  var TYPES_ECH = { avis: ['✍', 'Avis de dégustation'], envie: ['🙋', 'Aimerait la goûter'], reco: ['💡', 'Recommandation'], selection: ['🛒', 'Sélection sur une offre'] };
   function proprio() { return (session && session.proprietaire) || 'le propriétaire'; }
   function majBadgeEch(n) {
     var b = $('#nb-ech'); if (!b) return;
@@ -756,6 +756,7 @@
       });
       var bouteille = function (x) {
         var t = esc(libEch(x)) + (x.appellation && x.nom !== x.appellation ? ' <span class="muted">· ' + esc(x.appellation) + '</span>' : '');
+        if (x.offre_id) return '<a href="#/offres/' + esc(x.offre_id) + '">' + esc([x.domaine, x.nom].filter(Boolean).join(' · ')) + '</a>' + (x.prix ? ' <span class="pill">' + eur(x.prix, true) + '</span>' : '');
         return x.vin_id ? '<a href="#/bouteille/' + esc(x.vin_id) + '">' + t + '</a>' : t;
       };
       var carte = function (x, dest) {
@@ -767,7 +768,7 @@
           '<div class="row" style="gap:8px"><span class="qi">' + ty[0] + '</span><div style="flex:1;min-width:0"><div class="small muted">' + ty[1] + ' · ' + qui + ' · ' + dateFr(x.cree_le) + '</div>' +
           '<div class="t">' + bouteille(x) + (x.type === 'avis' && x.note !== '' ? ' <span class="pill">' + esc(x.note) + '/20</span>' : '') + '</div></div></div>' +
           (x.message ? '<p style="margin:8px 0 0;white-space:pre-wrap">' + esc(x.message) + '</p>' : '') +
-          (x.lieu || x.prix ? '<p class="small muted" style="margin:6px 0 0">' + [x.lieu ? 'Où : ' + esc(x.lieu) : '', x.prix ? 'Prix : ' + eur(x.prix) : ''].filter(Boolean).join(' · ') + '</p>' : '') +
+          (!x.offre_id && (x.lieu || x.prix) ? '<p class="small muted" style="margin:6px 0 0">' + [x.lieu ? 'Où : ' + esc(x.lieu) : '', x.prix ? 'Prix : ' + eur(x.prix) : ''].filter(Boolean).join(' · ') + '</p>' : '') +
           '<div class="row" style="margin-top:8px;justify-content:flex-end">' +
             (x.recu && x.type === 'reco' && !x.vin_id && estAdmin() ? (x.statut === 'traite' ? '<span class="small muted">Ajoutée à la prospection</span>'
               : '<button class="ghost small" data-prosp="' + esc(x.id) + '">→ Prospection</button>') : '') +
@@ -3466,6 +3467,14 @@
   function vueOffres(v, id) {
     if (id) return vueOffre(v, id);
     return charger('offres', 'offres.lister', true).then(function (list) {
+      if (!estAdmin()) {
+        v.innerHTML = '<div class="head"><h1>Offres</h1><span class="muted">Offres partagées par ' + esc(proprio()) + ' : composez votre sélection et envoyez-la</span></div>' +
+          '<div class="card">' + (list.length ? '<table><tbody>' + list.map(function (o) {
+            return '<tr><td><a href="#/offres/' + esc(o.id) + '"><strong>' + esc(o.vendeur || 'Vendeur') + '</strong></a><div class="small muted">' + esc(o.objet) + '</div></td>' +
+              '<td class="small">' + dateFr(o.cree_le) + '</td><td class="n small">' + o.nb_articles + ' articles</td></tr>';
+          }).join('') + '</tbody></table>' : '<p class="muted">Aucune offre partagée pour l’instant.</p>') + '</div>';
+        return;
+      }
       v.innerHTML = '<div class="head"><h1>Offres reçues</h1><span class="muted">Listes de vendeurs reçues par mail, analysées ligne par ligne</span></div>' +
         '<div class="grid" style="grid-template-columns:minmax(0,3fr) minmax(0,2fr);align-items:start" id="o-grid">' +
           '<form class="card" id="f-off"><h2>Analyser une offre</h2>' +
@@ -3482,11 +3491,15 @@
             '<div class="form"><div class="full"><label for="i-fic">Fichier</label><input id="i-fic" type="file" accept=".csv,.json,.txt,text/csv,application/json" required></div>' +
             '<div><label for="i-vendeur">Vendeur</label><input id="i-vendeur" placeholder="ex. ViniPro"></div>' +
             '<div><label for="i-objet">Objet</label><input id="i-objet" placeholder="ex. Catalogue de fin d’année"></div>' +
+            '<div><label for="i-carton">Vendu par</label><select id="i-carton">' + options([['0', 'bouteille'], ['6', 'carton de 6'], ['12', 'carton de 12'], ['3', 'carton de 3']], '0') + '</select></div>' +
+            '<div><label for="i-min">Minimum de commande (cartons ou bouteilles)</label><input id="i-min" type="number" min="1" max="99" value="1"></div>' +
+            '<p class="full small muted" style="margin:0">Réglage par défaut : les mentions du catalogue (« vendu par carton de 12 », « 1 carton acheté = 1 offert ») priment, et il se change ensuite sur l’offre.</p>' +
             '<div class="full row"><label class="row" style="margin:0;font-weight:500;color:var(--ink)"><input type="checkbox" id="i-port" style="width:auto"> Port inclus (si le fichier ne le précise pas)</label>' +
               '<span class="spacer"></span><button type="submit">⤒ Importer</button></div></div>' +
           '</form>' +
           '<div class="card"><h2>Offres analysées</h2>' + (list.length ? '<table><tbody>' + list.map(function (o) {
-            return '<tr><td><a href="#/offres/' + esc(o.id) + '"><strong>' + esc(o.vendeur || 'Vendeur') + '</strong></a><div class="small muted">' + esc(o.objet) + '</div></td>' +
+            return '<tr><td><a href="#/offres/' + esc(o.id) + '"><strong>' + esc(o.vendeur || 'Vendeur') + '</strong></a>' +
+              (o.partagee === true || String(o.partagee).toUpperCase() === 'TRUE' ? ' <span class="tag">partagée</span>' : '') + '<div class="small muted">' + esc(o.objet) + '</div></td>' +
               '<td class="small">' + dateFr(o.cree_le) + '</td><td class="n small"><span class="up">' + (o.nb_affaires || 0) + '</span> / ' + o.nb_articles + '</td></tr>';
           }).join('') + '</tbody></table><p class="small muted">affaires / articles</p>' : '<p class="muted">Aucune offre analysée pour l’instant.</p>') + '</div>' +
         '</div>';
@@ -3501,7 +3514,8 @@
         if (f.size > 3000000) return toast('Fichier trop volumineux : découpez-le en plusieurs imports', true);
         busy(btn, true, 'Import…');
         lireTexteFichier(f).then(function (texte) {
-          return api('offres.importer', { texte: texte, vendeur: $('#i-vendeur').value.trim(), objet: $('#i-objet').value.trim(), port_inclus: $('#i-port').checked });
+          return api('offres.importer', { texte: texte, vendeur: $('#i-vendeur').value.trim(), objet: $('#i-objet').value.trim(), port_inclus: $('#i-port').checked,
+            carton: $('#i-carton').value, lot_min: $('#i-min').value });
         }).then(function (r) {
           delete cache.offres;
           toast(r.nb_articles + ' articles importés' + (r.a_estimer ? ', ' + r.a_estimer + ' sans prix de marché' : ''));
@@ -3525,6 +3539,7 @@
       var cle = 'cave_panier_' + id, panier = {};
       try { panier = JSON.parse(localStorage.getItem(cle) || '{}'); } catch (e) {}
       var filtre = '', assurance = false;
+      var partagee = o.partagee === true || String(o.partagee).toUpperCase() === 'TRUE';
       var fx = { q: '', cat: '', type: '', tri: 'verdict' };
       var aEstimer = arts.filter(function (x) { return x.estime === false; }).length;
       var faibles = arts.filter(function (x) { return x.confiance === 'faible' && x.source_estimation === 'préanalyse'; }).length;
@@ -3540,15 +3555,21 @@
 
       v.innerHTML = '<p class="small"><a href="#/offres">← Offres</a></p>' +
         '<div class="head"><div><h1>' + esc(o.vendeur || 'Offre') + '</h1><div class="muted">' + esc(o.objet) + ' · ' + (a.importee ? 'importée' : 'analysée') + ' le ' + dateFr(o.cree_le) + '</div></div>' +
-        '<span class="spacer"></span><button class="danger small" id="o-del">Supprimer</button></div>' +
+        '<span class="spacer"></span>' + (estAdmin() ? '<label class="row small" style="margin:0;font-weight:500;color:var(--ink);flex-wrap:nowrap" title="Les visiteurs voient l’offre et peuvent vous envoyer leur sélection">' +
+          '<input type="checkbox" id="o-partage" style="width:auto"' + (partagee ? ' checked' : '') + '> Partagée avec les visiteurs</label>' +
+          '<button class="danger small" id="o-del">Supprimer</button>' : '') + '</div>' +
         (a.synthese ? '<div class="ia-box" style="margin-bottom:12px">' + esc(a.synthese) + '</div>' : '') +
         ((a.alertes || []).length ? '<div class="card" style="margin-bottom:12px;border-color:var(--warn)"><strong>Points d’attention</strong><ul style="margin:6px 0 0;padding-left:20px">' +
           a.alertes.map(function (x) { return '<li>' + esc(x) + '</li>'; }).join('') + '</ul></div>' : '') +
-        (aEstimer || faibles ? '<div class="card" id="o-est" style="margin-bottom:12px;display:flex;gap:10px;align-items:center;flex-wrap:wrap">' +
+        (estAdmin() && (aEstimer || faibles) ? '<div class="card" id="o-est" style="margin-bottom:12px;display:flex;gap:10px;align-items:center;flex-wrap:wrap">' +
           '<span style="flex:1;min-width:220px">' + (aEstimer ? '<strong>' + aEstimer + ' article' + (aEstimer > 1 ? 's' : '') + ' sans prix de marché.</strong> ' : 'Tous les articles ont un prix de marché. ') +
             '<span class="small muted">L’IA les estime par lots de 30 (une requête Gemini par lot).</span></span>' +
           (faibles ? '<label class="row small" style="margin:0;font-weight:500;color:var(--ink);flex-wrap:nowrap"><input type="checkbox" id="o-faible" style="width:auto"' + (aEstimer ? '' : ' checked') + '> revoir aussi les ' + faibles + ' préestimations de confiance faible</label>' : '') +
           '<button id="o-estimer">✨ Estimer avec l’IA</button></div>' : '') +
+        (estAdmin() && a.importee ? '<div class="row small" style="margin:0 0 12px;gap:8px"><span class="muted">Vente par défaut (articles sans mention dans le catalogue) :</span>' +
+          '<select id="o-carton" style="width:auto;padding:4px 8px">' + options([['0', 'à la bouteille'], ['6', 'carton de 6'], ['12', 'carton de 12'], ['3', 'carton de 3']], String(num(a.carton_defaut))) + '</select>' +
+          '<label for="o-min" style="margin:0">minimum</label><input id="o-min" type="number" min="1" max="99" value="' + (num(a.lot_min_defaut) || 1) + '" style="width:64px;padding:4px 6px">' +
+          '<button class="ghost small" id="o-cond">Appliquer</button></div>' : '') +
         '<div class="cats" id="o-filtres"></div>' +
         (arts.length > 20 ? '<div class="filters" style="margin-bottom:12px"><input id="o-q" placeholder="Rechercher (domaine, appellation, réf.)…">' +
           (cats.length > 1 ? '<select id="o-cat">' + options(cats, '', 'Toutes catégories') + '</select>' : '') +
@@ -3561,16 +3582,26 @@
         '<p class="small muted">Prix de marché : estimations de l’IA, à recouper pour les achats importants. « Prix rendu » = prix + part du port pour le panier en cours.</p>';
       if (window.matchMedia('(max-width: 900px)').matches) { $('#o-main').style.gridTemplateColumns = '1fr'; $('#o-panier').style.position = 'static'; }
 
+      // Unité de vente : le panier compte des unités (bouteille, carton, lot), les prix restent par bouteille
+      var parUnite = function (x) { return Math.max(1, num(x.vendu_par) || 1); };
+      var dispoMax = function (x) { return a.importee && num(x.quantite_dispo) <= 1 ? 99 : num(x.quantite_dispo) || 99; };
+      var libUnites = function (x, q) {
+        var u = parUnite(x);
+        if (u === 1) return q + ' btl';
+        var cart = /^carton de/.test(x.conditionnement || '');
+        return q + ' ' + (cart ? 'carton' : 'lot') + (q > 1 ? 's' : '') + ' (' + q * u + ' btl)';
+      };
       function totaux() {
         var t = { lignes: 0, btl: 0, equiv: 0, sous: 0, marche: 0, marcheConnu: true };
         arts.forEach(function (x) {
           var q = num(panier[x.n]); if (!q) return;
-          t.lignes++; t.btl += q; t.sous += q * x.prix_unitaire;
-          if (!x.port_inclus) t.equiv += q * x.equiv_bouteilles;
-          if (x.prix_marche) t.marche += q * x.prix_marche; else t.marcheConnu = false;
+          var b = q * parUnite(x);
+          t.lignes++; t.btl += b; t.sous += b * x.prix_unitaire;
+          if (!x.port_inclus) t.equiv += b * x.equiv_bouteilles;
+          if (x.prix_marche) t.marche += b * x.prix_marche; else t.marcheConnu = false;
         });
         t.equiv = Math.ceil(t.equiv);
-        t.port = calculGrille(a.frais_port, t.equiv);
+        t.port = t.lignes && !t.equiv ? 0 : calculGrille(a.frais_port, t.equiv);   // tout en port inclus
         t.assur = assurance ? (calculGrille(a.assurance, t.equiv) || 0) : 0;
         t.total = t.sous + (t.port || 0) + t.assur;
         return t;
@@ -3607,10 +3638,13 @@
         $('#o-table').innerHTML = '<thead><tr><th>Panier</th><th>Article</th><th>Verdict</th><th class="n">Prix u.</th><th class="n">Marché</th><th class="n">Écart</th><th class="n">Prix rendu</th></tr></thead><tbody>' +
           (l.length ? l.map(function (x) {
             var rendu = x.prix_unitaire + (x.port_inclus ? 0 : portParEquiv * x.equiv_bouteilles);
-            return '<tr><td><input type="number" min="0" max="' + x.quantite_dispo + '" value="' + (num(panier[x.n]) || 0) + '" data-n="' + x.n + '" aria-label="Quantité" style="width:64px;padding:5px 6px">' +
-                '<div class="small muted" style="margin-top:2px">dispo ' + x.quantite_dispo + '</div></td>' +
+            var u = parUnite(x), qn = num(panier[x.n]) || 0;
+            return '<tr><td><input type="number" min="0" max="' + dispoMax(x) + '" value="' + qn + '" data-n="' + x.n + '" aria-label="Quantité (' + (u > 1 ? 'cartons ou lots' : 'bouteilles') + ')" style="width:64px;padding:5px 6px">' +
+                '<div class="small muted" style="margin-top:2px;max-width:110px">' + (u > 1 ? (qn ? libUnites(x, qn) : '× ' + u + ' btl') : 'bouteille' + (qn > 1 ? 's' : '')) +
+                  (num(x.lot_min) > 1 ? '<br>min. ' + x.lot_min : '') + (dispoMax(x) < 99 ? '<br>dispo ' + dispoMax(x) : '') + '</div></td>' +
               '<td style="min-width:220px">' + dot(x.couleur) + ' <strong>' + esc(x.designation) + '</strong>' +
                 (x.format_cl && x.format_cl !== 75 ? ' <span class="tag">' + esc(x.format_cl) + ' cl</span>' : '') +
+                (u > 1 ? ' <span class="tag tag-cond">' + esc(x.conditionnement || 'par ' + u) + '</span>' : '') +
                 (x.port_inclus ? ' <span class="tag">port inclus</span>' : '') +
                 (enCave(x) ? ' <span class="tag">déjà en cave</span>' : '') +
                 (x.millesime && String(x.designation).indexOf(String(x.millesime)) < 0 ? ' <span class="muted">' + esc(x.millesime) + '</span>' : '') +
@@ -3620,14 +3654,17 @@
                    x.confiance && x.prix_marche ? '<span class="conf conf-' + esc(x.confiance) + '">' + esc(CONF[x.confiance] || x.confiance) +
                      (x.source_estimation === 'Gemini' ? ' (IA)' : '') + '</span>' : ''].filter(Boolean).join(' · ') + '</div>' : '') + '</td>' +
               '<td>' + pillVerdict(x.verdict) + (x.a_boire ? '<div class="small muted" style="margin-top:4px">' + esc(x.a_boire) + '</div>' : '') + '</td>' +
-              '<td class="n">' + eur(x.prix_unitaire, true) + (x.prix_barre ? '<div class="small muted"><s>' + eur(x.prix_barre, true) + '</s></div>' : '') +
+              '<td class="n">' + eur(x.prix_unitaire, true) + (u > 1 ? '<div class="small muted">la btl</div><div class="small">' + eur(u * x.prix_unitaire, true) + ' les ' + u + '</div>' : '') +
+                (x.prix_barre ? '<div class="small muted"><s>' + eur(x.prix_barre, true) + '</s></div>' : '') +
                 '</td><td class="n">' + (x.prix_marche ? eur(x.prix_marche) : '-') + '</td>' +
               '<td class="n ' + (x.ecart < 0 ? 'up' : x.ecart > 0 ? 'down' : '') + '">' + (x.ecart === null ? '-' : (x.ecart > 0 ? '+' : '') + x.ecart + ' %') + '</td>' +
               '<td class="n">' + eur(rendu, true) + '</td></tr>';
           }).join('') : '<tr><td colspan="7" class="empty">' + (filtre === 'panier' ? 'Panier vide : indiquez une quantité sur les lignes qui vous intéressent.' : 'Aucun article.') + '</td></tr>') + '</tbody>';
         $$('#o-table input[data-n]').forEach(function (i) {
           i.onchange = function () {
-            var n = i.getAttribute('data-n'), q = Math.max(0, Math.min(num(i.max), Math.round(num(i.value))));
+            var n = i.getAttribute('data-n'), x = arts.filter(function (y) { return String(y.n) === n; })[0];
+            var q = Math.max(0, Math.min(num(i.max), Math.round(num(i.value))));
+            if (q && x && q < num(x.lot_min)) { q = num(x.lot_min); toast('Minimum ' + q + ' pour cet article'); }
             i.value = q; if (q) panier[n] = q; else delete panier[n];
             try { localStorage.setItem(cle, JSON.stringify(panier)); } catch (e) {}
             rendreTable();
@@ -3640,23 +3677,38 @@
         var eco = t.marche && t.marcheConnu ? t.marche - t.sous - (t.port || 0) - t.assur : null;
         var ligne = function (l, val, fort) { return '<div class="row" style="justify-content:space-between;margin:4px 0' + (fort ? ';font-weight:700;font-size:1.1rem' : '') + '"><span>' + l + '</span><span class="n">' + val + '</span></div>'; };
         $('#o-panier').innerHTML = '<h2>Panier</h2>' + (t.lignes ?
-          ligne(t.btl + ' article' + (t.btl > 1 ? 's' : '') + ' · ' + t.equiv + ' éq. btl', '') +
+          ligne(t.btl + ' bouteille' + (t.btl > 1 ? 's' : '') + ' · ' + t.equiv + ' éq. btl', '') +
           ligne('Sous-total', eur(t.sous, true)) +
-          ligne('Port', t.port === null ? '<span class="muted">grille absente</span>' : eur(t.port, true)) +
+          ligne('Port', t.port === null ? '<span class="muted">grille absente</span>' : !t.equiv ? 'inclus' : eur(t.port, true)) +
           ((a.assurance || []).length ? '<label class="row small" style="font-weight:500;color:var(--ink);margin:4px 0"><input type="checkbox" id="o-assur" style="width:auto"' + (assurance ? ' checked' : '') + '> Assurance ' + (assurance ? eur(t.assur, true) : '') + '</label>' : '') +
           '<hr style="border:0;border-top:1px solid var(--line)">' + ligne('Total', eur(t.total, true), true) +
-          ligne('Moyenne par article', eur(t.total / t.btl, true)) +
+          ligne('Moyenne par bouteille', eur(t.total / t.btl, true)) +
           (eco !== null ? ligne('Économie vs marché', '<span class="' + (eco >= 0 ? 'up' : 'down') + '">' + eur(Math.abs(eco)) + (eco < 0 ? ' de plus' : '') + '</span>') : '') +
           (t.port !== null && a.frais_port && a.frais_port.length ? '<p class="small muted">' + conseilPort(a.frais_port, t.equiv) + '</p>' : '') +
-          '<div class="row" style="margin-top:10px"><button id="o-copier">Copier la commande</button><button class="ghost" id="o-suivi">Ajouter à la prospection</button></div>' +
+          '<div class="row" style="margin-top:10px">' + (estAdmin() ? '<button id="o-copier">Copier la commande</button><button class="ghost" id="o-suivi">Ajouter à la prospection</button>'
+            : '<button id="o-envoyer">🛒 Envoyer ma sélection à ' + esc(proprio()) + '</button>') + '</div>' +
           '<textarea id="o-cmd" readonly hidden style="margin-top:8px;min-height:150px"></textarea>'
           : '<p class="muted">Indiquez des quantités dans le tableau pour calculer le coût avec le port.</p>');
         if (!t.lignes) return;
         if ($('#o-assur')) $('#o-assur').onchange = function () { assurance = this.checked; rendreTable(); };
+        var lignesPanier = function () {
+          return arts.filter(function (x) { return num(panier[x.n]); }).map(function (x) {
+            return '- ' + libUnites(x, num(panier[x.n])) + ' × ' + x.designation + (x.millesime && String(x.designation).indexOf(String(x.millesime)) < 0 ? ' ' + x.millesime : '') +
+              (x.ref ? ' (réf. ' + x.ref + ')' : '') + (parUnite(x) > 1 && x.conditionnement ? ', ' + x.conditionnement : '') +
+              ' : ' + eur(x.prix_unitaire, true) + ' la btl, soit ' + eur(num(panier[x.n]) * parUnite(x) * x.prix_unitaire, true);
+          }).join('\n');
+        };
+        if ($('#o-envoyer')) $('#o-envoyer').onclick = function () {
+          var txt = lignesPanier() + '\n\nTotal : ' + eur(t.total, true) + (t.port ? ' (dont ' + eur(t.port, true) + ' de port)' : '');
+          envoyerEch(this, { type: 'selection', offre_id: id, message: txt, prix: Math.round(t.total * 100) / 100 },
+            'Sélection envoyée à ' + proprio(), function () { panier = {}; try { localStorage.removeItem(cle); } catch (e) {} rendreTable(); });
+        };
+        if (!$('#o-copier')) return;
         $('#o-copier').onclick = function () {
           var txt = 'Bonjour' + (o.vendeur ? ' ' + o.vendeur : '') + ',\n\nJe serais intéressé par :\n' +
             arts.filter(function (x) { return num(panier[x.n]); }).map(function (x) {
-              return '- ' + panier[x.n] + ' × ' + x.designation + ' (' + eur(x.prix_unitaire, true) + ')';
+              return '- ' + libUnites(x, num(panier[x.n])) + ' × ' + x.designation + (x.ref ? ' (réf. ' + x.ref + ')' : '') +
+                ' : ' + eur(x.prix_unitaire, true) + (parUnite(x) > 1 ? ' la btl, soit ' + eur(num(panier[x.n]) * parUnite(x) * x.prix_unitaire, true) : '');
             }).join('\n') + '\n\nSoit ' + eur(t.sous, true) + (t.port ? ' + ' + eur(t.port, true) + ' de port' : '') + (t.assur ? ' + ' + eur(t.assur, true) + ' d’assurance' : '') +
             ' = ' + eur(t.total, true) + '.\n\nMerci de me confirmer la disponibilité.\n\nCordialement';
           var ta = $('#o-cmd'); ta.value = txt; ta.hidden = false;
@@ -3671,7 +3723,7 @@
             return api('prosp.enregistrer', { domaine: x.domaine || x.designation, nom: x.domaine ? x.designation : '', type: x.type, couleur: x.couleur,
               appellation: x.appellation, millesime: x.millesime, prix_vu: x.prix_unitaire, lieu: o.vendeur || 'Offre par mail',
               priorite: x.verdict === 'tres_bonne_affaire' ? 3 : 2, statut: 'a_acheter',
-              note: panier[x.n] + ' btl · ' + (VERDICTS[x.verdict] || '') + (x.prix_marche ? ' (marché ~' + x.prix_marche + ' €)' : '') + (x.commentaire ? ' · ' + x.commentaire : '') });
+              note: libUnites(x, num(panier[x.n])) + ' · ' + (VERDICTS[x.verdict] || '') + (x.prix_marche ? ' (marché ~' + x.prix_marche + ' €)' : '') + (x.commentaire ? ' · ' + x.commentaire : '') });
           })).then(function () { busy(b, false); toast(choix.length + ' ligne(s) ajoutée(s) à la prospection'); }).catch(function (e) { busy(b, false); fail(e); });
         };
       }
@@ -3685,7 +3737,21 @@
         return reste > 0 ? 'Vous pouvez ajouter ' + reste + ' bouteille' + (reste > 1 ? 's' : '') + ' sans payer plus de port.' : 'Tranche de port pleine : au-delà, le port augmente.';
       }
 
-      $('#o-del').onclick = function () {
+      if ($('#o-cond')) $('#o-cond').onclick = function () {
+        var bt = this; busy(bt, true);
+        api('offres.conditionner', { id: id, carton: $('#o-carton').value, lot_min: $('#o-min').value }).then(function () {
+          try { localStorage.removeItem(cle); } catch (e) {}
+          toast('Unités de vente mises à jour (panier vidé)'); route();
+        }).catch(function (e) { busy(bt, false); fail(e); });
+      };
+      if ($('#o-partage')) $('#o-partage').onchange = function () {
+        var c = this; c.disabled = true;
+        api('offres.partager', { id: id, partagee: c.checked }).then(function () {
+          c.disabled = false; delete cache.offres;
+          toast(c.checked ? 'Offre visible par les visiteurs (page Offres)' : 'Offre retirée des visiteurs');
+        }).catch(function (e) { c.disabled = false; c.checked = !c.checked; fail(e); });
+      };
+      if ($('#o-del')) $('#o-del').onclick = function () {
         if (!window.demoConfirm('Supprimer cette analyse ?')) return;
         api('offres.supprimer', { id: id }).then(function () { delete cache.offres; location.hash = '#/offres'; }).catch(fail);
       };
