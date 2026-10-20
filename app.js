@@ -265,6 +265,10 @@
     if (session.role && session.quota_ia !== undefined) { appliquerRole(); return route(); }
     // Session ouverte avant l'arrivée des rôles : on demande le rôle au serveur
     api('moi').then(function (m) {
+      if (!m.role) {
+        // Ancien backend : il ne connaît pas encore les rôles. On ne devine rien (refus par défaut), on prévient.
+        toast('Le serveur Apps Script n’est pas à jour : remplacez les fichiers .gs, lancez setupApplication, puis Déployer → Nouvelle version.', true);
+      }
       session.role = m.role; session.voir_prix = m.voir_prix; session.proprietaire = m.proprietaire;
       session.quota_ia = m.quota_ia; session.ia_restant = m.ia_restant;
       try { sessionStorage.setItem('cave_session', JSON.stringify(session)); } catch (e) {}
@@ -3447,6 +3451,18 @@
     return t ? num(t.prix) : null;
   }
 
+  function lireTexteFichier(f) {
+    var lire = function (enc) {
+      return new Promise(function (ok, ko) {
+        var r = new FileReader();
+        r.onload = function () { ok(String(r.result)); };
+        r.onerror = function () { ko(new Error('Lecture du fichier impossible')); };
+        r.readAsText(f, enc);
+      });
+    };
+    return lire('UTF-8').then(function (t) { return t.indexOf('\uFFFD') > -1 ? lire('windows-1252') : t; });
+  }
+
   function vueOffres(v, id) {
     if (id) return vueOffre(v, id);
     return charger('offres', 'offres.lister', true).then(function (list) {
@@ -3459,12 +3475,39 @@
             '<div class="full"><label for="o-texte">Texte du mail</label><textarea id="o-texte" name="texte" style="min-height:220px" required placeholder="1 Ch. Meyney Saint-Estèphe 1988 = 25 euros&#10;…&#10;Frais de port : 1 bouteille = 8 euros…"></textarea></div>' +
             '<div class="full row"><span class="small muted">Comptez 20 à 60 secondes pour une longue liste.</span><span class="spacer"></span><button type="submit">✨ Analyser l’offre</button></div></div>' +
           '</form>' +
+          '<form class="card" id="f-imp"><h2>Importer un catalogue</h2>' +
+            '<p class="muted small">Pour les gros catalogues déjà structurés (tableur, extraction faite par Claude) : un fichier CSV au format d’import Ma Cave ' +
+              '(séparateur point-virgule, colonne « Prix unitaire (€) » obligatoire) ou un JSON d’analyse. Les prix de marché déjà présents sont repris tels quels ; ' +
+              'seuls les articles sans prix partent ensuite à l’IA, par lots de 30.</p>' +
+            '<div class="form"><div class="full"><label for="i-fic">Fichier</label><input id="i-fic" type="file" accept=".csv,.json,.txt,text/csv,application/json" required></div>' +
+            '<div><label for="i-vendeur">Vendeur</label><input id="i-vendeur" placeholder="ex. ViniPro"></div>' +
+            '<div><label for="i-objet">Objet</label><input id="i-objet" placeholder="ex. Catalogue de fin d’année"></div>' +
+            '<div class="full row"><label class="row" style="margin:0;font-weight:500;color:var(--ink)"><input type="checkbox" id="i-port" style="width:auto"> Port inclus (si le fichier ne le précise pas)</label>' +
+              '<span class="spacer"></span><button type="submit">⤒ Importer</button></div></div>' +
+          '</form>' +
           '<div class="card"><h2>Offres analysées</h2>' + (list.length ? '<table><tbody>' + list.map(function (o) {
             return '<tr><td><a href="#/offres/' + esc(o.id) + '"><strong>' + esc(o.vendeur || 'Vendeur') + '</strong></a><div class="small muted">' + esc(o.objet) + '</div></td>' +
               '<td class="small">' + dateFr(o.cree_le) + '</td><td class="n small"><span class="up">' + (o.nb_affaires || 0) + '</span> / ' + o.nb_articles + '</td></tr>';
           }).join('') + '</tbody></table><p class="small muted">affaires / articles</p>' : '<p class="muted">Aucune offre analysée pour l’instant.</p>') + '</div>' +
         '</div>';
       if (window.matchMedia('(max-width: 820px)').matches) $('#o-grid').style.gridTemplateColumns = '1fr';
+      // Le formulaire d'import rejoint la colonne de gauche, sous l'analyse de mail
+      var gauche = document.createElement('div'); gauche.style.display = 'grid'; gauche.style.gap = '16px'; gauche.style.minWidth = '0';
+      $('#o-grid').insertBefore(gauche, $('#f-off')); gauche.appendChild($('#f-off')); gauche.appendChild($('#f-imp'));
+      $('#f-imp').onsubmit = function (e) {
+        e.preventDefault();
+        var f = $('#i-fic').files[0], btn = $('button[type=submit]', this);
+        if (!f) return;
+        if (f.size > 3000000) return toast('Fichier trop volumineux : découpez-le en plusieurs imports', true);
+        busy(btn, true, 'Import…');
+        lireTexteFichier(f).then(function (texte) {
+          return api('offres.importer', { texte: texte, vendeur: $('#i-vendeur').value.trim(), objet: $('#i-objet').value.trim(), port_inclus: $('#i-port').checked });
+        }).then(function (r) {
+          delete cache.offres;
+          toast(r.nb_articles + ' articles importés' + (r.a_estimer ? ', ' + r.a_estimer + ' sans prix de marché' : ''));
+          location.hash = '#/offres/' + r.id;
+        }).catch(function (err) { busy(btn, false); fail(err); });
+      };
       $('#f-off').onsubmit = function (e) {
         e.preventDefault();
         var d = Object.fromEntries(new FormData(this));
@@ -3482,6 +3525,12 @@
       var cle = 'cave_panier_' + id, panier = {};
       try { panier = JSON.parse(localStorage.getItem(cle) || '{}'); } catch (e) {}
       var filtre = '', assurance = false;
+      var fx = { q: '', cat: '', type: '', tri: 'verdict' };
+      var aEstimer = arts.filter(function (x) { return x.estime === false; }).length;
+      var faibles = arts.filter(function (x) { return x.confiance === 'faible' && x.source_estimation === 'préanalyse'; }).length;
+      var cats = arts.map(function (x) { return x.categorie; }).filter(Boolean).filter(function (x, i, t) { return t.indexOf(x) === i; });
+      var types = arts.map(function (x) { return x.type; }).filter(Boolean).filter(function (x, i, t) { return t.indexOf(x) === i; });
+      var CONF = { haute: 'confiance haute', moyenne: 'confiance moyenne', faible: 'confiance faible' };
       var enCave = function (art) {
         var d = norm(art.domaine || '').replace(/^(chateau|ch\.?|domaine|dom\.?)\s+/, '');
         return d.length > 3 && vins.some(function (x) { return norm(x.domaine).indexOf(d) > -1; });
@@ -3490,12 +3539,21 @@
       arts.forEach(function (x) { compte[x.verdict] = (compte[x.verdict] || 0) + 1; });
 
       v.innerHTML = '<p class="small"><a href="#/offres">← Offres</a></p>' +
-        '<div class="head"><div><h1>' + esc(o.vendeur || 'Offre') + '</h1><div class="muted">' + esc(o.objet) + ' · analysée le ' + dateFr(o.cree_le) + '</div></div>' +
+        '<div class="head"><div><h1>' + esc(o.vendeur || 'Offre') + '</h1><div class="muted">' + esc(o.objet) + ' · ' + (a.importee ? 'importée' : 'analysée') + ' le ' + dateFr(o.cree_le) + '</div></div>' +
         '<span class="spacer"></span><button class="danger small" id="o-del">Supprimer</button></div>' +
         (a.synthese ? '<div class="ia-box" style="margin-bottom:12px">' + esc(a.synthese) + '</div>' : '') +
         ((a.alertes || []).length ? '<div class="card" style="margin-bottom:12px;border-color:var(--warn)"><strong>Points d’attention</strong><ul style="margin:6px 0 0;padding-left:20px">' +
           a.alertes.map(function (x) { return '<li>' + esc(x) + '</li>'; }).join('') + '</ul></div>' : '') +
+        (aEstimer || faibles ? '<div class="card" id="o-est" style="margin-bottom:12px;display:flex;gap:10px;align-items:center;flex-wrap:wrap">' +
+          '<span style="flex:1;min-width:220px">' + (aEstimer ? '<strong>' + aEstimer + ' article' + (aEstimer > 1 ? 's' : '') + ' sans prix de marché.</strong> ' : 'Tous les articles ont un prix de marché. ') +
+            '<span class="small muted">L’IA les estime par lots de 30 (une requête Gemini par lot).</span></span>' +
+          (faibles ? '<label class="row small" style="margin:0;font-weight:500;color:var(--ink);flex-wrap:nowrap"><input type="checkbox" id="o-faible" style="width:auto"' + (aEstimer ? '' : ' checked') + '> revoir aussi les ' + faibles + ' préestimations de confiance faible</label>' : '') +
+          '<button id="o-estimer">✨ Estimer avec l’IA</button></div>' : '') +
         '<div class="cats" id="o-filtres"></div>' +
+        (arts.length > 20 ? '<div class="filters" style="margin-bottom:12px"><input id="o-q" placeholder="Rechercher (domaine, appellation, réf.)…">' +
+          (cats.length > 1 ? '<select id="o-cat">' + options(cats, '', 'Toutes catégories') + '</select>' : '') +
+          (types.length > 1 ? '<select id="o-type">' + options(types, '', 'Tous types') + '</select>' : '') +
+          '<select id="o-tri">' + options([['verdict', 'Tri : verdict'], ['ecart', 'Tri : écart'], ['prix', 'Tri : prix'], ['catalogue', 'Tri : n° catalogue']], 'verdict') + '</select></div>' : '') +
         '<div class="grid" style="grid-template-columns:minmax(0,1fr) 300px;align-items:start" id="o-main">' +
           '<div class="card" style="padding:0"><div class="table-wrap"><table id="o-table"></table></div></div>' +
           '<div class="card" id="o-panier" style="position:sticky;top:calc(env(safe-area-inset-top, 0px) + 70px)"></div>' +
@@ -3529,8 +3587,23 @@
       function rendreTable() {
         var t = totaux();
         var portParEquiv = t.equiv && t.port ? t.port / t.equiv : calculGrille(a.frais_port, 1) || 0;
-        var l = arts.filter(function (x) { return !filtre || (filtre === 'panier' ? num(panier[x.n]) > 0 : x.verdict === filtre); })
-          .sort(function (x, y) { return filtre ? 0 : VERDICT_ORDRE.indexOf(x.verdict) - VERDICT_ORDRE.indexOf(y.verdict) || (x.ecart || 0) - (y.ecart || 0); });
+        var q = norm(fx.q);
+        var tris = {
+          verdict: function (x, y) { return VERDICT_ORDRE.indexOf(x.verdict) - VERDICT_ORDRE.indexOf(y.verdict) || (x.ecart || 0) - (y.ecart || 0); },
+          ecart: function (x, y) { return (x.ecart === null ? 999 : x.ecart) - (y.ecart === null ? 999 : y.ecart); },
+          prix: function (x, y) { return x.prix_unitaire - y.prix_unitaire; },
+          catalogue: function (x, y) { return (num(x.num_catalogue) || x.n) - (num(y.num_catalogue) || y.n); }
+        };
+        var l = arts.filter(function (x) {
+          if (filtre && (filtre === 'panier' ? !(num(panier[x.n]) > 0) : x.verdict !== filtre)) return false;
+          if (fx.cat && x.categorie !== fx.cat) return false;
+          if (fx.type && x.type !== fx.type) return false;
+          if (q) {
+            var h = norm([x.designation, x.domaine, x.appellation, x.categorie, x.millesime, x.ref, x.num_catalogue, x.commentaire, x.etat].join(' '));
+            if (!q.split(/\s+/).every(function (w) { return h.indexOf(w) > -1; })) return false;
+          }
+          return true;
+        }).sort(tris[fx.tri] || tris.verdict);
         $('#o-table').innerHTML = '<thead><tr><th>Panier</th><th>Article</th><th>Verdict</th><th class="n">Prix u.</th><th class="n">Marché</th><th class="n">Écart</th><th class="n">Prix rendu</th></tr></thead><tbody>' +
           (l.length ? l.map(function (x) {
             var rendu = x.prix_unitaire + (x.port_inclus ? 0 : portParEquiv * x.equiv_bouteilles);
@@ -3540,9 +3613,15 @@
                 (x.format_cl && x.format_cl !== 75 ? ' <span class="tag">' + esc(x.format_cl) + ' cl</span>' : '') +
                 (x.port_inclus ? ' <span class="tag">port inclus</span>' : '') +
                 (enCave(x) ? ' <span class="tag">déjà en cave</span>' : '') +
-                '<div class="small muted">' + esc([x.etat, x.commentaire].filter(Boolean).join(' · ')) + '</div></td>' +
+                (x.millesime && String(x.designation).indexOf(String(x.millesime)) < 0 ? ' <span class="muted">' + esc(x.millesime) + '</span>' : '') +
+                '<div class="small muted">' + esc([x.etat, x.commentaire].filter(Boolean).join(' · ')) + '</div>' +
+                (x.ref || x.num_catalogue || x.confiance ? '<div class="small muted o-meta">' +
+                  [x.num_catalogue ? 'n° ' + esc(x.num_catalogue) : '', x.ref ? 'réf. ' + esc(x.ref) : '',
+                   x.confiance && x.prix_marche ? '<span class="conf conf-' + esc(x.confiance) + '">' + esc(CONF[x.confiance] || x.confiance) +
+                     (x.source_estimation === 'Gemini' ? ' (IA)' : '') + '</span>' : ''].filter(Boolean).join(' · ') + '</div>' : '') + '</td>' +
               '<td>' + pillVerdict(x.verdict) + (x.a_boire ? '<div class="small muted" style="margin-top:4px">' + esc(x.a_boire) + '</div>' : '') + '</td>' +
-              '<td class="n">' + eur(x.prix_unitaire, true) + '</td><td class="n">' + (x.prix_marche ? eur(x.prix_marche) : '-') + '</td>' +
+              '<td class="n">' + eur(x.prix_unitaire, true) + (x.prix_barre ? '<div class="small muted"><s>' + eur(x.prix_barre, true) + '</s></div>' : '') +
+                '</td><td class="n">' + (x.prix_marche ? eur(x.prix_marche) : '-') + '</td>' +
               '<td class="n ' + (x.ecart < 0 ? 'up' : x.ecart > 0 ? 'down' : '') + '">' + (x.ecart === null ? '-' : (x.ecart > 0 ? '+' : '') + x.ecart + ' %') + '</td>' +
               '<td class="n">' + eur(rendu, true) + '</td></tr>';
           }).join('') : '<tr><td colspan="7" class="empty">' + (filtre === 'panier' ? 'Panier vide : indiquez une quantité sur les lignes qui vous intéressent.' : 'Aucun article.') + '</td></tr>') + '</tbody>';
@@ -3609,6 +3688,30 @@
       $('#o-del').onclick = function () {
         if (!window.demoConfirm('Supprimer cette analyse ?')) return;
         api('offres.supprimer', { id: id }).then(function () { delete cache.offres; location.hash = '#/offres'; }).catch(fail);
+      };
+      if ($('#o-q')) $('#o-q').oninput = function () { fx.q = this.value; rendreTable(); };
+      if ($('#o-cat')) $('#o-cat').onchange = function () { fx.cat = this.value; rendreTable(); };
+      if ($('#o-type')) $('#o-type').onchange = function () { fx.type = this.value; rendreTable(); };
+      if ($('#o-tri')) $('#o-tri').onchange = function () { fx.tri = this.value; rendreTable(); };
+      if ($('#o-estimer')) $('#o-estimer').onclick = function () {
+        var btn = this, revoir = !!($('#o-faible') && $('#o-faible').checked), total = 0;
+        if (!aEstimer && !revoir) return toast('Cochez « revoir aussi… » pour relancer l’estimation', true);
+        busy(btn, true, 'Estimation…');
+        if ($('#o-faible')) $('#o-faible').disabled = true;
+        (function suivant() {
+          api('offres.estimerPrix', { id: id, revoir_faible: revoir, lots: 1 }).then(function (r) {
+            total = total || r.total;
+            btn.innerHTML = '<span class="spin"></span> ' + (total - r.restants) + ' / ' + total;
+            if (r.restants > 0 && r.total > 0) return suivant();
+            delete cache.offres; toast('Estimation terminée : ' + r.nb_affaires + ' affaires'); route();
+          }).catch(function (e) {
+            if (e.code === 'IA_QUOTA' || e.code === 'IA_SATURE') {
+              btn.innerHTML = '<span class="spin"></span> pause (' + (e.code === 'IA_QUOTA' ? 'quota' : 'Gemini surchargé') + ')…';
+              return setTimeout(suivant, 30000);
+            }
+            busy(btn, false); fail(e); route();
+          });
+        })();
       };
       rendreFiltres(); rendreTable();
     });
