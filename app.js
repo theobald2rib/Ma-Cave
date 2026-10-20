@@ -3491,9 +3491,11 @@
             '<div class="form"><div class="full"><label for="i-fic">Fichier</label><input id="i-fic" type="file" accept=".csv,.json,.txt,text/csv,application/json" required></div>' +
             '<div><label for="i-vendeur">Vendeur</label><input id="i-vendeur" placeholder="ex. ViniPro"></div>' +
             '<div><label for="i-objet">Objet</label><input id="i-objet" placeholder="ex. Catalogue de fin d’année"></div>' +
-            '<div><label for="i-carton">Vendu par</label><select id="i-carton">' + options([['0', 'bouteille'], ['6', 'carton de 6'], ['12', 'carton de 12'], ['3', 'carton de 3']], '0') + '</select></div>' +
-            '<div><label for="i-min">Minimum de commande (cartons ou bouteilles)</label><input id="i-min" type="number" min="1" max="99" value="1"></div>' +
-            '<p class="full small muted" style="margin:0">Réglage par défaut : les mentions du catalogue (« vendu par carton de 12 », « 1 carton acheté = 1 offert ») priment, et il se change ensuite sur l’offre.</p>' +
+            '<div class="full"><label for="i-carton">Unité de vente, pour les lignes qui ne la précisent pas</label><select id="i-carton">' +
+              options([['0', 'Selon le fichier, sinon à la bouteille'], ['6', 'Selon le fichier, sinon carton de 6'], ['12', 'Selon le fichier, sinon carton de 12'], ['3', 'Selon le fichier, sinon carton de 3']], '0') + '</select></div>' +
+            '<div><label for="i-min">Minimum par défaut</label><input id="i-min" type="number" min="1" max="99" value="1"></div>' +
+            '<p class="full small muted" style="margin:0">L’unité se lit ligne par ligne : colonne « Vendu par (btl) » du fichier, sinon mentions du catalogue (« vendu par carton de 12 », « 1 carton acheté = 1 offert »), sinon ce réglage. ' +
+              'Chaque ligne se corrige ensuite sur l’offre (clic sur son unité).</p>' +
             '<div class="full row"><label class="row" style="margin:0;font-weight:500;color:var(--ink)"><input type="checkbox" id="i-port" style="width:auto"> Port inclus (si le fichier ne le précise pas)</label>' +
               '<span class="spacer"></span><button type="submit">⤒ Importer</button></div></div>' +
           '</form>' +
@@ -3518,7 +3520,9 @@
             carton: $('#i-carton').value, lot_min: $('#i-min').value });
         }).then(function (r) {
           delete cache.offres;
-          toast(r.nb_articles + ' articles importés' + (r.a_estimer ? ', ' + r.a_estimer + ' sans prix de marché' : ''));
+          var un = r.unites || {};
+          toast(r.nb_articles + ' articles importés' + (r.a_estimer ? ', ' + r.a_estimer + ' sans prix de marché' : '') +
+            '. Unité de vente : ' + (un.fichier || 0) + ' lue(s) dans le fichier, ' + (un.remarque || 0) + ' déduite(s) des mentions, ' + (un.defaut || 0) + ' par défaut.');
           location.hash = '#/offres/' + r.id;
         }).catch(function (err) { busy(btn, false); fail(err); });
       };
@@ -3644,7 +3648,9 @@
                   (num(x.lot_min) > 1 ? '<br>min. ' + x.lot_min : '') + (dispoMax(x) < 99 ? '<br>dispo ' + dispoMax(x) : '') + '</div></td>' +
               '<td style="min-width:220px">' + dot(x.couleur) + ' <strong>' + esc(x.designation) + '</strong>' +
                 (x.format_cl && x.format_cl !== 75 ? ' <span class="tag">' + esc(x.format_cl) + ' cl</span>' : '') +
-                (u > 1 ? ' <span class="tag tag-cond">' + esc(x.conditionnement || 'par ' + u) + '</span>' : '') +
+                (estAdmin() && a.importee ? ' <button type="button" class="tag tag-cond tag-btn" data-cond="' + x.n + '" title="Modifier l’unité de vente de cette ligne">' +
+                    esc(u > 1 ? x.conditionnement || 'par ' + u : 'à la bouteille') + (x.cond_source === 'defaut' ? ' ?' : '') + ' ✎</button>'
+                  : u > 1 ? ' <span class="tag tag-cond">' + esc(x.conditionnement || 'par ' + u) + '</span>' : '') +
                 (x.port_inclus ? ' <span class="tag">port inclus</span>' : '') +
                 (enCave(x) ? ' <span class="tag">déjà en cave</span>' : '') +
                 (x.millesime && String(x.designation).indexOf(String(x.millesime)) < 0 ? ' <span class="muted">' + esc(x.millesime) + '</span>' : '') +
@@ -3660,6 +3666,32 @@
               '<td class="n ' + (x.ecart < 0 ? 'up' : x.ecart > 0 ? 'down' : '') + '">' + (x.ecart === null ? '-' : (x.ecart > 0 ? '+' : '') + x.ecart + ' %') + '</td>' +
               '<td class="n">' + eur(rendu, true) + '</td></tr>';
           }).join('') : '<tr><td colspan="7" class="empty">' + (filtre === 'panier' ? 'Panier vide : indiquez une quantité sur les lignes qui vous intéressent.' : 'Aucun article.') + '</td></tr>') + '</tbody>';
+        $$('#o-table [data-cond]').forEach(function (bt) {
+          bt.onclick = function () {
+            var x = arts.filter(function (y) { return String(y.n) === bt.getAttribute('data-cond'); })[0];
+            modal('<h2>Unité de vente</h2><p class="muted" style="margin-top:-4px">' + esc(x.designation) + (x.ref ? ' · réf. ' + esc(x.ref) : '') + '</p>' +
+              (x.etat ? '<p class="small">Mention du catalogue : ' + esc(x.etat) + '</p>' : '') +
+              '<form id="f-cond"><div class="grid g2" style="gap:10px"><div><label for="c-u">Bouteilles par unité commandée</label><input id="c-u" type="number" min="1" max="120" value="' + parUnite(x) + '"></div>' +
+              '<div><label for="c-min">Minimum (unités)</label><input id="c-min" type="number" min="1" max="99" value="' + (num(x.lot_min) || 1) + '"></div></div>' +
+              '<label for="c-lib">Libellé</label><input id="c-lib" maxlength="80" value="' + esc(x.conditionnement || '') + '" placeholder="ex. carton de 6, 2 cartons de 6 dont 1 offert">' +
+              '<p class="small muted">Le prix reste celui d’une bouteille (' + eur(x.prix_unitaire, true) + ') ; 1 = vente à la bouteille.</p>' +
+              '<div class="row"><span class="spacer"></span><button type="button" class="ghost" id="m-annuler">Annuler</button><button type="submit">Enregistrer</button></div></form>',
+              function (root) {
+                $('#m-annuler', root).onclick = closeModal;
+                $('#f-cond', root).onsubmit = function (e) {
+                  e.preventDefault();
+                  var b2 = $('button[type=submit]', this); busy(b2, true);
+                  api('offres.majArticle', { id: id, n: x.n, vendu_par: $('#c-u', root).value, lot_min: $('#c-min', root).value, conditionnement: $('#c-lib', root).value })
+                    .then(function (r) {
+                      x.vendu_par = r.vendu_par; x.conditionnement = r.conditionnement; x.lot_min = r.lot_min; x.cond_source = 'manuel';
+                      if (panier[x.n] && num(panier[x.n]) < r.lot_min) panier[x.n] = r.lot_min;
+                      try { localStorage.setItem(cle, JSON.stringify(panier)); } catch (err) {}
+                      closeModal(); toast('Unité de vente enregistrée'); rendreTable();
+                    }).catch(function (err) { busy(b2, false); fail(err); });
+                };
+              });
+          };
+        });
         $$('#o-table input[data-n]').forEach(function (i) {
           i.onchange = function () {
             var n = i.getAttribute('data-n'), x = arts.filter(function (y) { return String(y.n) === n; })[0];
