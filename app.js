@@ -1591,6 +1591,18 @@
           return { nom: pr.nom, domaine: pr.domaine, type: pr.type, couleur: pr.couleur, appellation: pr.appellation,
             millesime: pr.millesime, _prix: pr.prix_vu, _fournisseur: pr.lieu, _pro: pr.id };
         })
+      : params.off ? api('offres.lire', { id: params.off }).then(function (o) {
+          var x = (o.analyse.articles || []).filter(function (y) { return String(y.n) === String(params.n); })[0] || {};
+          var q = 0;
+          try { q = num(JSON.parse(localStorage.getItem('cave_panier_' + params.off) || '{}')[x.n]); } catch (e) {}
+          var deg = num(String(x.degre || '').replace(',', '.').replace(/[^\d.]/g, ''));
+          return { domaine: x.domaine, nom: x.domaine && x.appellation && x.domaine !== x.appellation ? '' : x.designation,
+            type: x.type, couleur: x.couleur, appellation: x.appellation, millesime: x.millesime,
+            contenance_cl: x.format_cl, degre: deg || '', temp_service: x.temperature, description: x.degustation,
+            accords: (x.accords || []).join(', '), boire_des: x.boire_des, apogee_debut: x.apogee_debut, apogee_fin: x.apogee_fin, boire_avant: x.boire_avant,
+            cote_unitaire: x.prix_marche || '', notes_perso: [x.distinctions, x.garde_vendeur ? 'Garde annoncée : ' + x.garde_vendeur : '', x.sucre ? 'Sucre : ' + x.sucre : ''].filter(Boolean).join('\n'),
+            _prix: x.prix_unitaire, _fournisseur: o.vendeur, _quantite: q ? q * Math.max(1, num(x.vendu_par) || 1) : Math.max(1, num(x.vendu_par) || 1) };
+        })
       : Promise.resolve({});
 
     return Promise.all([p, charger('vins', 'cave.lister')]).then(function (r) {
@@ -1630,7 +1642,7 @@
             (edition ? '' :
               '<fieldset><legend>Entrée en cave</legend><div class="form">' +
                 '<div><label>Type d’entrée</label><select name="_type">' + options([['achat', 'Achat'], ['cadeau_recu', 'Cadeau reçu']], 'achat') + '</select></div>' +
-                '<div><label>Quantité</label><input name="_quantite" type="number" min="0" value="1"></div>' +
+                '<div><label>Quantité</label><input name="_quantite" type="number" min="0" value="' + (num(b._quantite) || 1) + '"></div>' +
                 '<div><label>Prix unitaire (€)</label><input name="_prix" type="number" step="0.01" min="0" value="' + esc(b._prix || '') + '"></div>' +
                 '<div><label>Date</label><input name="_date" type="date" value="' + today() + '"></div>' +
                 '<div class="full"><label>Fournisseur / lieu</label><input name="_fournisseur" value="' + esc(b._fournisseur || '') + '"></div>' +
@@ -3544,9 +3556,24 @@
       try { panier = JSON.parse(localStorage.getItem(cle) || '{}'); } catch (e) {}
       var filtre = '', assurance = false;
       var partagee = o.partagee === true || String(o.partagee).toUpperCase() === 'TRUE';
-      var fx = { q: '', cat: '', type: '', tri: 'verdict' };
+      var fx = { q: '', cat: '', type: '', garde: '', accord: '', tri: 'verdict' };
       var aEstimer = arts.filter(function (x) { return x.estime === false; }).length;
       var faibles = arts.filter(function (x) { return x.confiance === 'faible' && x.source_estimation === 'préanalyse'; }).length;
+      // Garde : même règle que sansGarde_ côté serveur
+      var sansGarde = arts.filter(function (x) {
+        return !x.garde_estimee && !num(x.boire_des) && !num(x.boire_avant) && !/spiritueux|liqueur|bi[eè]re/i.test(x.type || '') && !/coffret/i.test(x.designation || '');
+      }).length;
+      var aGarde = function (x) { return num(x.boire_des) || num(x.apogee_debut) || num(x.apogee_fin) || num(x.boire_avant); };
+      var matArt = function (x) {
+        if (!aGarde(x)) return x.a_boire === 'garde' ? 'peut_attendre' : x.a_boire === 'maintenant' ? 'a_boire' : '';
+        var m = maturiteLocale(x);
+        // Vin annoncé « de garde » sans date de début : il gagne encore à attendre
+        if (x.a_boire === 'garde' && !num(x.boire_des) && /^a_boire/.test(m) && num(x.boire_avant) - ANNEE >= 4) return 'peut_attendre';
+        return m;
+      };
+      var accordsDispo = [];
+      arts.forEach(function (x) { (x.accords || []).forEach(function (c) { if (accordsDispo.indexOf(c) < 0) accordsDispo.push(c); }); });
+      var GARDES = { maintenant: ['a_boire', 'apogee', 'a_boire_vite'], garder: ['trop_jeune', 'peut_attendre'], passe: ['passee'] };
       var cats = arts.map(function (x) { return x.categorie; }).filter(Boolean).filter(function (x, i, t) { return t.indexOf(x) === i; });
       var types = arts.map(function (x) { return x.type; }).filter(Boolean).filter(function (x, i, t) { return t.indexOf(x) === i; });
       var CONF = { haute: 'confiance haute', moyenne: 'confiance moyenne', faible: 'confiance faible' };
@@ -3570,6 +3597,10 @@
             '<span class="small muted">L’IA les estime par lots de 30 (une requête Gemini par lot).</span></span>' +
           (faibles ? '<label class="row small" style="margin:0;font-weight:500;color:var(--ink);flex-wrap:nowrap"><input type="checkbox" id="o-faible" style="width:auto"' + (aEstimer ? '' : ' checked') + '> revoir aussi les ' + faibles + ' préestimations de confiance faible</label>' : '') +
           '<button id="o-estimer">✨ Estimer avec l’IA</button></div>' : '') +
+        (estAdmin() && sansGarde ? '<div class="card" style="margin-bottom:12px;display:flex;gap:10px;align-items:center;flex-wrap:wrap">' +
+          '<span style="flex:1;min-width:220px"><strong>' + sansGarde + ' vin' + (sansGarde > 1 ? 's' : '') + ' sans indication de garde.</strong> ' +
+            '<span class="small muted">L’IA donne pour chacun la fenêtre « buvable dès, apogée, à boire avant », par lots de 40 sur le modèle léger (environ ' + Math.ceil(sansGarde / 40) + ' requête' + (sansGarde > 40 ? 's' : '') + ').</span></span>' +
+          '<button id="o-garde">⏳ Estimer la garde</button></div>' : '') +
         (estAdmin() && a.importee ? '<div class="row small" style="margin:0 0 12px;gap:8px"><span class="muted">Vente par défaut (articles sans mention dans le catalogue) :</span>' +
           '<select id="o-carton" style="width:auto;padding:4px 8px">' + options([['0', 'à la bouteille'], ['6', 'carton de 6'], ['12', 'carton de 12'], ['3', 'carton de 3']], String(num(a.carton_defaut))) + '</select>' +
           '<label for="o-min" style="margin:0">minimum</label><input id="o-min" type="number" min="1" max="99" value="' + (num(a.lot_min_defaut) || 1) + '" style="width:64px;padding:4px 6px">' +
@@ -3578,7 +3609,9 @@
         (arts.length > 20 ? '<div class="filters" style="margin-bottom:12px"><input id="o-q" placeholder="Rechercher (domaine, appellation, réf.)…">' +
           (cats.length > 1 ? '<select id="o-cat">' + options(cats, '', 'Toutes catégories') + '</select>' : '') +
           (types.length > 1 ? '<select id="o-type">' + options(types, '', 'Tous types') + '</select>' : '') +
-          '<select id="o-tri">' + options([['verdict', 'Tri : verdict'], ['ecart', 'Tri : écart'], ['prix', 'Tri : prix'], ['catalogue', 'Tri : n° catalogue']], 'verdict') + '</select></div>' : '') +
+          (accordsDispo.length ? '<select id="o-accord">' + options(accordsDispo.sort(), '', 'Tous accords') + '</select>' : '') +
+          (arts.some(matArt) ? '<select id="o-garde-f">' + options([['maintenant', 'À boire maintenant'], ['garder', 'À garder'], ['passe', 'Garde dépassée'], ['inconnue', 'Garde inconnue']], '', 'Toute garde') + '</select>' : '') +
+          '<select id="o-tri">' + options([['verdict', 'Tri : verdict'], ['ecart', 'Tri : écart'], ['prix', 'Tri : prix'], ['garde', 'Tri : garde la plus longue'], ['catalogue', 'Tri : n° catalogue']], 'verdict') + '</select></div>' : '') +
         '<div class="grid" style="grid-template-columns:minmax(0,1fr) 300px;align-items:start" id="o-main">' +
           '<div class="card" style="padding:0"><div class="table-wrap"><table id="o-table"></table></div></div>' +
           '<div class="card" id="o-panier" style="position:sticky;top:calc(env(safe-area-inset-top, 0px) + 70px)"></div>' +
@@ -3627,14 +3660,18 @@
           verdict: function (x, y) { return VERDICT_ORDRE.indexOf(x.verdict) - VERDICT_ORDRE.indexOf(y.verdict) || (x.ecart || 0) - (y.ecart || 0); },
           ecart: function (x, y) { return (x.ecart === null ? 999 : x.ecart) - (y.ecart === null ? 999 : y.ecart); },
           prix: function (x, y) { return x.prix_unitaire - y.prix_unitaire; },
-          catalogue: function (x, y) { return (num(x.num_catalogue) || x.n) - (num(y.num_catalogue) || y.n); }
+          catalogue: function (x, y) { return (num(x.num_catalogue) || x.n) - (num(y.num_catalogue) || y.n); },
+          garde: function (x, y) { return (num(y.boire_avant) || num(y.apogee_fin)) - (num(x.boire_avant) || num(x.apogee_fin)); }
         };
         var l = arts.filter(function (x) {
           if (filtre && (filtre === 'panier' ? !(num(panier[x.n]) > 0) : x.verdict !== filtre)) return false;
           if (fx.cat && x.categorie !== fx.cat) return false;
           if (fx.type && x.type !== fx.type) return false;
+          if (fx.garde && (fx.garde === 'inconnue' ? matArt(x) : GARDES[fx.garde].indexOf(matArt(x)) < 0)) return false;
+          if (fx.accord && (x.accords || []).indexOf(fx.accord) < 0) return false;
           if (q) {
-            var h = norm([x.designation, x.domaine, x.appellation, x.categorie, x.millesime, x.ref, x.num_catalogue, x.commentaire, x.etat].join(' '));
+            var h = norm([x.designation, x.domaine, x.appellation, x.categorie, x.millesime, x.ref, x.num_catalogue, x.commentaire, x.etat,
+              (x.accords || []).join(' '), x.distinctions, x.degustation].join(' '));
             if (!q.split(/\s+/).every(function (w) { return h.indexOf(w) > -1; })) return false;
           }
           return true;
@@ -3646,7 +3683,8 @@
             return '<tr><td><input type="number" min="0" max="' + dispoMax(x) + '" value="' + qn + '" data-n="' + x.n + '" aria-label="Quantité (' + (u > 1 ? 'cartons ou lots' : 'bouteilles') + ')" style="width:64px;padding:5px 6px">' +
                 '<div class="small muted" style="margin-top:2px;max-width:110px">' + (u > 1 ? (qn ? libUnites(x, qn) : '× ' + u + ' btl') : 'bouteille' + (qn > 1 ? 's' : '')) +
                   (num(x.lot_min) > 1 ? '<br>min. ' + x.lot_min : '') + (dispoMax(x) < 99 ? '<br>dispo ' + dispoMax(x) : '') + '</div></td>' +
-              '<td style="min-width:220px">' + dot(x.couleur) + ' <strong>' + esc(x.designation) + '</strong>' +
+              '<td style="min-width:220px">' + dot(x.couleur) + ' <button type="button" class="lien-art" data-fiche="' + x.n + '">' + esc(x.designation) + '</button>' +
+                (x.distinctions ? ' <span class="tag tag-medaille" title="' + esc(x.distinctions) + '">🏅 ' + esc(String(x.distinctions).split(/\s*,\s*/)[0]) + '</span>' : '') +
                 (x.format_cl && x.format_cl !== 75 ? ' <span class="tag">' + esc(x.format_cl) + ' cl</span>' : '') +
                 (estAdmin() && a.importee ? ' <button type="button" class="tag tag-cond tag-btn" data-cond="' + x.n + '" title="Modifier l’unité de vente de cette ligne">' +
                     esc(u > 1 ? x.conditionnement || 'par ' + u : 'à la bouteille') + (x.cond_source === 'defaut' ? ' ?' : '') + ' ✎</button>'
@@ -3655,17 +3693,25 @@
                 (enCave(x) ? ' <span class="tag">déjà en cave</span>' : '') +
                 (x.millesime && String(x.designation).indexOf(String(x.millesime)) < 0 ? ' <span class="muted">' + esc(x.millesime) + '</span>' : '') +
                 '<div class="small muted">' + esc([x.etat, x.commentaire].filter(Boolean).join(' · ')) + '</div>' +
+                ((x.accords || []).length ? '<div class="o-acc">' + x.accords.slice(0, 5).map(function (c) { return '<span>' + esc(c) + '</span>'; }).join('') + '</div>' : '') +
                 (x.ref || x.num_catalogue || x.confiance ? '<div class="small muted o-meta">' +
                   [x.num_catalogue ? 'n° ' + esc(x.num_catalogue) : '', x.ref ? 'réf. ' + esc(x.ref) : '',
                    x.confiance && x.prix_marche ? '<span class="conf conf-' + esc(x.confiance) + '">' + esc(CONF[x.confiance] || x.confiance) +
                      (x.source_estimation === 'Gemini' ? ' (IA)' : '') + '</span>' : ''].filter(Boolean).join(' · ') + '</div>' : '') + '</td>' +
-              '<td>' + pillVerdict(x.verdict) + (x.a_boire ? '<div class="small muted" style="margin-top:4px">' + esc(x.a_boire) + '</div>' : '') + '</td>' +
+              '<td>' + pillVerdict(x.verdict) +
+                (matArt(x) ? '<div style="margin-top:4px">' + pillMat(matArt(x)) + '</div><div class="small muted">' +
+                    esc([num(x.boire_des) ? 'dès ' + x.boire_des : '', num(x.apogee_debut) && num(x.apogee_fin) ? 'apogée ' + x.apogee_debut + '–' + x.apogee_fin : '',
+                         num(x.boire_avant) ? 'jusqu’en ' + x.boire_avant : '', x.garde_vendeur && !/plusieurs/.test(x.garde_vendeur) ? 'garde ' + x.garde_vendeur : ''].filter(Boolean).join(' · ')) + '</div>'
+                  : x.a_boire ? '<div class="small muted" style="margin-top:4px">' + esc(x.a_boire) + '</div>' : '') + '</td>' +
               '<td class="n">' + eur(x.prix_unitaire, true) + (u > 1 ? '<div class="small muted">la btl</div><div class="small">' + eur(u * x.prix_unitaire, true) + ' les ' + u + '</div>' : '') +
                 (x.prix_barre ? '<div class="small muted"><s>' + eur(x.prix_barre, true) + '</s></div>' : '') +
                 '</td><td class="n">' + (x.prix_marche ? eur(x.prix_marche) : '-') + '</td>' +
               '<td class="n ' + (x.ecart < 0 ? 'up' : x.ecart > 0 ? 'down' : '') + '">' + (x.ecart === null ? '-' : (x.ecart > 0 ? '+' : '') + x.ecart + ' %') + '</td>' +
               '<td class="n">' + eur(rendu, true) + '</td></tr>';
           }).join('') : '<tr><td colspan="7" class="empty">' + (filtre === 'panier' ? 'Panier vide : indiquez une quantité sur les lignes qui vous intéressent.' : 'Aucun article.') + '</td></tr>') + '</tbody>';
+        $$('#o-table [data-fiche]').forEach(function (bt) {
+          bt.onclick = function () { ficheArticle(arts.filter(function (y) { return String(y.n) === bt.getAttribute('data-fiche'); })[0]); };
+        });
         $$('#o-table [data-cond]').forEach(function (bt) {
           bt.onclick = function () {
             var x = arts.filter(function (y) { return String(y.n) === bt.getAttribute('data-cond'); })[0];
@@ -3791,6 +3837,50 @@
       if ($('#o-cat')) $('#o-cat').onchange = function () { fx.cat = this.value; rendreTable(); };
       if ($('#o-type')) $('#o-type').onchange = function () { fx.type = this.value; rendreTable(); };
       if ($('#o-tri')) $('#o-tri').onchange = function () { fx.tri = this.value; rendreTable(); };
+      function ficheArticle(x) {
+        var kv = function (k, val) { return val ? '<dt>' + k + '</dt><dd>' + val + '</dd>' : ''; };
+        var m = matArt(x);
+        modal('<h2 style="margin-bottom:4px">' + esc(x.designation) + (x.millesime && String(x.designation).indexOf(String(x.millesime)) < 0 ? ' ' + esc(x.millesime) : '') + '</h2>' +
+          '<p class="muted" style="margin-top:0">' + esc([x.type, x.couleur, x.appellation, x.categorie].filter(Boolean).filter(function (y, i, t) { return t.indexOf(y) === i; }).join(' · ')) + '</p>' +
+          '<div class="row" style="gap:6px;margin-bottom:10px">' + pillVerdict(x.verdict) + (m ? pillMat(m) : '') +
+            (x.distinctions ? String(x.distinctions).split(/\s*,\s*/).map(function (d) { return '<span class="tag tag-medaille">🏅 ' + esc(d) + '</span>'; }).join('') : '') + '</div>' +
+          (x.degustation ? '<p>' + esc(x.degustation) + '</p>' : '') +
+          ((x.accords || []).length ? '<div class="tags" style="margin-bottom:10px">' + x.accords.map(function (c) { return '<span class="tag">' + esc(c) + '</span>'; }).join('') + '</div>' : '') +
+          '<dl class="kv">' +
+            kv('Garde', esc([x.garde_vendeur ? x.garde_vendeur + ' (vendeur)' : '', num(x.boire_des) ? 'dès ' + x.boire_des : '', num(x.boire_avant) ? 'jusqu’en ' + x.boire_avant : ''].filter(Boolean).join(' · '))) +
+            kv('Service', esc(x.temperature)) + kv('Degré', esc(x.degre)) + kv('Sucre', esc(x.sucre)) +
+            kv('Format', x.format_cl ? esc(x.format_cl) + ' cl' : '') + kv('Vente', esc(x.conditionnement || (num(x.vendu_par) > 1 ? 'par ' + x.vendu_par : 'à la bouteille'))) +
+            kv('Prix', eur(x.prix_unitaire, true) + ' la btl' + (x.prix_barre ? ' <s class="muted">' + eur(x.prix_barre, true) + '</s>' : '')) +
+            kv('Marché', x.prix_marche ? eur(x.prix_marche) + (x.ecart !== null ? ' (' + (x.ecart > 0 ? '+' : '') + x.ecart + ' %)' : '') + (x.commentaire ? '<div class="small muted">' + esc(x.commentaire) + '</div>' : '') : '') +
+            kv('Remarque', esc(x.etat)) + kv('Référence', esc([x.ref ? 'réf. ' + x.ref : '', x.num_catalogue ? 'n° ' + x.num_catalogue : ''].filter(Boolean).join(' · '))) +
+          '</dl>' +
+          '<div class="row" style="margin-top:12px"><span class="spacer"></span><button type="button" class="ghost" id="m-annuler">Fermer</button>' +
+            (estAdmin() ? '<a class="btn" href="#/ajouter?off=' + encodeURIComponent(id) + '&n=' + x.n + '">📥 Acheté : ajouter à la cave</a>' : '') + '</div>',
+          function (root) {
+            $('#m-annuler', root).onclick = closeModal;
+            $$('a.btn', root).forEach(function (l) { l.addEventListener('click', closeModal); });
+          });
+      }
+      if ($('#o-garde-f')) $('#o-garde-f').onchange = function () { fx.garde = this.value; rendreTable(); };
+      if ($('#o-accord')) $('#o-accord').onchange = function () { fx.accord = this.value; rendreTable(); };
+      if ($('#o-garde')) $('#o-garde').onclick = function () {
+        var btn = this, total = 0;
+        busy(btn, true, 'Garde…');
+        (function suivant() {
+          api('offres.estimerGarde', { id: id, lots: 1 }).then(function (r) {
+            total = total || r.total;
+            btn.innerHTML = '<span class="spin"></span> ' + (total - r.restants) + ' / ' + total;
+            if (r.restants > 0 && r.restants < r.total) return suivant();
+            toast(r.restants ? 'L’IA n’a pas pu tout estimer : relancez plus tard' : 'Garde estimée'); route();
+          }).catch(function (e) {
+            if (e.code === 'IA_QUOTA' || e.code === 'IA_SATURE') {
+              btn.innerHTML = '<span class="spin"></span> pause (' + (e.code === 'IA_QUOTA' ? 'quota' : 'Gemini surchargé') + ')…';
+              return setTimeout(suivant, 30000);
+            }
+            busy(btn, false); fail(e); route();
+          });
+        })();
+      };
       if ($('#o-estimer')) $('#o-estimer').onclick = function () {
         var btn = this, revoir = !!($('#o-faible') && $('#o-faible').checked), total = 0;
         if (!aEstimer && !revoir) return toast('Cochez « revoir aussi… » pour relancer l’estimation', true);
@@ -3800,7 +3890,7 @@
           api('offres.estimerPrix', { id: id, revoir_faible: revoir, lots: 1 }).then(function (r) {
             total = total || r.total;
             btn.innerHTML = '<span class="spin"></span> ' + (total - r.restants) + ' / ' + total;
-            if (r.restants > 0 && r.total > 0) return suivant();
+            if (r.restants > 0 && r.restants < r.total) return suivant();   // s'arrête si un lot n'a rien donné
             delete cache.offres; toast('Estimation terminée : ' + r.nb_affaires + ' affaires'); route();
           }).catch(function (e) {
             if (e.code === 'IA_QUOTA' || e.code === 'IA_SATURE') {
