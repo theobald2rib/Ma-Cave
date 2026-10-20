@@ -478,3 +478,5 @@ body.visiteur.avec-ia .ia-visiteur-only { display: inline-flex !important; }
 .conf-moyenne { color: var(--gold); }
 .conf-faible { color: var(--warn); }
 .tag-cond { background: var(--tint-gold); border-color: var(--gold); }
+.tag-btn { cursor: pointer; font: inherit; font-size: .78rem; color: var(--ink); padding: 1px 8px; }
+.tag-btn:hover { border-color: var(--wine); }
