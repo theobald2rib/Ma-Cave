@@ -158,7 +158,7 @@ legend { font-family: var(--serif); font-size: 1.2rem; font-weight: 700; padding
 .c-Ambré { background: #a85d1d; } .c-Incolore { background: #d8dde0; }
 
 /* Liste de la cave */
-.filters { display: grid; grid-template-columns: 2fr repeat(4, 1fr); gap: 10px; margin-bottom: 16px; }
+.filters { display: grid; grid-template-columns: minmax(200px, 2fr) repeat(auto-fit, minmax(140px, 1fr)); gap: 10px; margin-bottom: 16px; }
 @media (max-width: 760px) { .filters { grid-template-columns: 1fr 1fr; } .filters .q { grid-column: 1 / -1; } }
 .bottles { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 14px; }
 .bottle { display: flex; gap: 12px; padding: 12px; text-decoration: none; color: inherit; transition: transform .12s, box-shadow .12s; }
@@ -480,3 +480,8 @@ body.visiteur.avec-ia .ia-visiteur-only { display: inline-flex !important; }
 .tag-cond { background: var(--tint-gold); border-color: var(--gold); }
 .tag-btn { cursor: pointer; font: inherit; font-size: .78rem; color: var(--ink); padding: 1px 8px; }
 .tag-btn:hover { border-color: var(--wine); }
+.lien-art { background: none; border: 0; padding: 0; font: inherit; font-weight: 700; color: var(--ink); text-align: left; cursor: pointer; min-height: 0; }
+.lien-art:hover { color: var(--wine); text-decoration: underline; }
+.o-acc { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 3px; }
+.o-acc span { font-size: .72rem; padding: 0 7px; border-radius: 999px; background: var(--tint-ok); color: var(--ink); }
+.tag-medaille { background: var(--tint-gold); border-color: var(--gold); font-size: .75rem; }
