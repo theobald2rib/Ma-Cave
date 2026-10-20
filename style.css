@@ -433,7 +433,7 @@ body.visiteur .admin-only, body.sans-prix .prix-only,
 body.visiteur #fab, body.visiteur [data-quick], body.visiteur [data-ouvrir], body.visiteur [data-boire], body.visiteur [data-pas],
 body.visiteur [data-del-mvt], body.visiteur a[href^="#/ajouter"], body.visiteur a[href^="#/modifier"], body.visiteur a[href^="#/serie"],
 body.visiteur a[href^="#/apporter"], body.visiteur a[href^="#/journal"], body.visiteur a[href^="#/prospection"],
-body.visiteur a[href^="#/offres"], body.visiteur a[href^="#/inventaire"], body.visiteur a[href^="#/acces"],
+body.visiteur a[href^="#/inventaire"], body.visiteur a[href^="#/acces"],
 body.visiteur .photo-actions, body.visiteur #ph-sel, body.visiteur #b-boire, body.visiteur #b-achat, body.visiteur #b-sortie,
 body.visiteur #b-ajust, body.visiteur #b-archiver, body.visiteur #b-enrichir, body.visiteur #b-coter, body.visiteur .ent .row,
 body.visiteur .ent input, body.visiteur #sel-on, body.visiteur #sel-bar, body.visiteur #exp, body.visiteur #cave-compl,
@@ -477,3 +477,4 @@ body.visiteur.avec-ia .ia-visiteur-only { display: inline-flex !important; }
 .conf-haute { color: var(--ok); }
 .conf-moyenne { color: var(--gold); }
 .conf-faible { color: var(--warn); }
+.tag-cond { background: var(--tint-gold); border-color: var(--gold); }
