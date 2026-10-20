@@ -470,3 +470,10 @@ ul.avis p { margin: 4px 0 0; }
 body:not(.avec-ia) .ia-only { display: none !important; }
 .ia-visiteur-only { display: none !important; }
 body.visiteur.avec-ia .ia-visiteur-only { display: inline-flex !important; }
+
+/* ---------- Offres importées ---------- */
+.o-meta { margin-top: 2px; }
+.conf { font-weight: 600; }
+.conf-haute { color: var(--ok); }
+.conf-moyenne { color: var(--gold); }
+.conf-faible { color: var(--warn); }
