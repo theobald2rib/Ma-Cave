@@ -3476,6 +3476,12 @@
     return lire('UTF-8').then(function (t) { return t.indexOf('\uFFFD') > -1 ? lire('windows-1252') : t; });
   }
 
+  function libPartage(p) {
+    if (!p || p.mode === 'personne') return 'Non partagée';
+    if (p.mode === 'tous') return 'Partagée avec tous les visiteurs';
+    return 'Partagée avec ' + p.emails.length + ' personne' + (p.emails.length > 1 ? 's' : '');
+  }
+
   function vueOffres(v, id) {
     if (id) return vueOffre(v, id);
     return charger('offres', 'offres.lister', true).then(function (list) {
@@ -3513,7 +3519,7 @@
           '</form>' +
           '<div class="card"><h2>Offres analysées</h2>' + (list.length ? '<table><tbody>' + list.map(function (o) {
             return '<tr><td><a href="#/offres/' + esc(o.id) + '"><strong>' + esc(o.vendeur || 'Vendeur') + '</strong></a>' +
-              (o.partagee === true || String(o.partagee).toUpperCase() === 'TRUE' ? ' <span class="tag">partagée</span>' : '') + '<div class="small muted">' + esc(o.objet) + '</div></td>' +
+              (o.partage && o.partage.mode !== 'personne' ? ' <span class="tag">' + libPartage(o.partage) + '</span>' : '') + '<div class="small muted">' + esc(o.objet) + '</div></td>' +
               '<td class="small">' + dateFr(o.cree_le) + '</td><td class="n small"><span class="up">' + (o.nb_affaires || 0) + '</span> / ' + o.nb_articles + '</td></tr>';
           }).join('') + '</tbody></table><p class="small muted">affaires / articles</p>' : '<p class="muted">Aucune offre analysée pour l’instant.</p>') + '</div>' +
         '</div>';
@@ -3555,7 +3561,7 @@
       var cle = 'cave_panier_' + id, panier = {};
       try { panier = JSON.parse(localStorage.getItem(cle) || '{}'); } catch (e) {}
       var filtre = '', assurance = false;
-      var partagee = o.partagee === true || String(o.partagee).toUpperCase() === 'TRUE';
+      var partage = o.partage || { mode: 'personne', emails: [] };
       var fx = { q: '', cat: '', type: '', garde: '', accord: '', tri: 'verdict' };
       var aEstimer = arts.filter(function (x) { return x.estime === false; }).length;
       var faibles = arts.filter(function (x) { return x.confiance === 'faible' && x.source_estimation === 'préanalyse'; }).length;
@@ -3586,8 +3592,7 @@
 
       v.innerHTML = '<p class="small"><a href="#/offres">← Offres</a></p>' +
         '<div class="head"><div><h1>' + esc(o.vendeur || 'Offre') + '</h1><div class="muted">' + esc(o.objet) + ' · ' + (a.importee ? 'importée' : 'analysée') + ' le ' + dateFr(o.cree_le) + '</div></div>' +
-        '<span class="spacer"></span>' + (estAdmin() ? '<label class="row small" style="margin:0;font-weight:500;color:var(--ink);flex-wrap:nowrap" title="Les visiteurs voient l’offre et peuvent vous envoyer leur sélection">' +
-          '<input type="checkbox" id="o-partage" style="width:auto"' + (partagee ? ' checked' : '') + '> Partagée avec les visiteurs</label>' +
+        '<span class="spacer"></span>' + (estAdmin() ? '<button class="ghost small" id="o-partage" title="Qui voit cette offre et peut vous envoyer sa sélection">👥 ' + libPartage(partage) + '</button>' +
           '<button class="danger small" id="o-del">Supprimer</button>' : '') + '</div>' +
         (a.synthese ? '<div class="ia-box" style="margin-bottom:12px">' + esc(a.synthese) + '</div>' : '') +
         ((a.alertes || []).length ? '<div class="card" style="margin-bottom:12px;border-color:var(--warn)"><strong>Points d’attention</strong><ul style="margin:6px 0 0;padding-left:20px">' +
@@ -3822,12 +3827,39 @@
           toast('Unités de vente mises à jour (panier vidé)'); route();
         }).catch(function (e) { busy(bt, false); fail(e); });
       };
-      if ($('#o-partage')) $('#o-partage').onchange = function () {
-        var c = this; c.disabled = true;
-        api('offres.partager', { id: id, partagee: c.checked }).then(function () {
-          c.disabled = false; delete cache.offres;
-          toast(c.checked ? 'Offre visible par les visiteurs (page Offres)' : 'Offre retirée des visiteurs');
-        }).catch(function (e) { c.disabled = false; c.checked = !c.checked; fail(e); });
+      if ($('#o-partage')) $('#o-partage').onclick = function () {
+        var bt = this; busy(bt, true);
+        api('users.lister').then(function (users) {
+          busy(bt, false);
+          var dest = users.filter(function (u) { return u.actif && !u.moi; });
+          modal('<h2>Partager l’offre</h2><p class="muted" style="margin-top:-4px">Les personnes choisies voient l’offre dans leur menu Offres et peuvent vous envoyer leur sélection.</p>' +
+            '<form id="f-part">' +
+              [['personne', 'Personne (offre privée)'], ['tous', 'Tous les visiteurs, y compris ceux ajoutés plus tard'], ['certains', 'Seulement certaines personnes']].map(function (m) {
+                return '<label class="row" style="font-weight:500;color:var(--ink);margin:4px 0"><input type="radio" name="mode" value="' + m[0] + '" style="width:auto"' + (partage.mode === m[0] ? ' checked' : '') + '> ' + m[1] + '</label>';
+              }).join('') +
+              '<fieldset id="p-qui" style="margin-top:8px"' + (partage.mode === 'certains' ? '' : ' hidden') + '><legend>Qui ?</legend>' +
+                (dest.length ? '<div class="dest">' + dest.map(function (u) {
+                  return '<label class="row"><input type="checkbox" name="qui" value="' + esc(u.email) + '" style="width:auto"' + (partage.emails.indexOf(u.email) > -1 ? ' checked' : '') + '> ' +
+                    esc(u.nom || u.email) + ' <span class="small muted">' + esc(u.email) + '</span></label>';
+                }).join('') + '</div>' : '<p class="muted">Ajoutez d’abord des personnes dans <a href="#/acces">Accès</a>.</p>') + '</fieldset>' +
+              '<div class="row" style="margin-top:12px"><span class="spacer"></span><button type="button" class="ghost" id="m-annuler">Annuler</button><button type="submit">Enregistrer</button></div></form>',
+            function (root) {
+              $('#m-annuler', root).onclick = closeModal;
+              $$('[name=mode]', root).forEach(function (r) { r.onchange = function () { $('#p-qui', root).hidden = $('[name=mode]:checked', root).value !== 'certains'; }; });
+              $('#f-part', root).onsubmit = function (e) {
+                e.preventDefault();
+                var mode = $('[name=mode]:checked', root).value;
+                var emails = $$('[name=qui]:checked', root).map(function (c) { return c.value; });
+                if (mode === 'certains' && !emails.length) return toast('Cochez au moins une personne', true);
+                var b2 = $('button[type=submit]', this); busy(b2, true);
+                api('offres.partager', { id: id, mode: mode, emails: emails }).then(function (r) {
+                  partage = r.partage; delete cache.offres; closeModal();
+                  bt.innerHTML = '👥 ' + libPartage(partage);
+                  toast(partage.mode === 'personne' ? 'Offre privée' : 'Offre partagée : ' + libPartage(partage).toLowerCase());
+                }).catch(function (err) { busy(b2, false); fail(err); });
+              };
+            });
+        }).catch(function (e) { busy(bt, false); fail(e); });
       };
       if ($('#o-del')) $('#o-del').onclick = function () {
         if (!window.demoConfirm('Supprimer cette analyse ?')) return;
