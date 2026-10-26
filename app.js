@@ -232,7 +232,7 @@
    * ======================================================= */
   var ROUTES = {
     '': vueAccueil, cave: vueCave, bouteille: vueBouteille, ajouter: vueFormulaire, modifier: vueFormulaire,
-    accords: vueAccords, apporter: vueApporter, serie: vueSerie, degustations: vueDegustations, inventaire: vueInventaire, offres: vueOffres, prospection: vueProspection, valeur: vueValeur, journal: vueJournal, acces: vueAcces, echanges: vueEchanges, analyser: vueAnalyser
+    accords: vueAccords, apporter: vueApporter, serie: vueSerie, degustations: vueDegustations, inventaire: vueInventaire, offres: vueOffres, prospection: vueProspection, valeur: vueValeur, journal: vueJournal, acces: vueAcces, echanges: vueEchanges, analyser: vueAnalyser, carnet: vueCarnet
   };
   var ROUTES_ADMIN = ['ajouter', 'modifier', 'serie', 'apporter', 'inventaire', 'prospection', 'journal', 'acces'];
 
@@ -770,6 +770,7 @@
           (x.message ? '<p style="margin:8px 0 0;white-space:pre-wrap">' + esc(x.message) + '</p>' : '') +
           (!x.offre_id && (x.lieu || x.prix) ? '<p class="small muted" style="margin:6px 0 0">' + [x.lieu ? 'Où : ' + esc(x.lieu) : '', x.prix ? 'Prix : ' + eur(x.prix) : ''].filter(Boolean).join(' · ') + '</p>' : '') +
           '<div class="row" style="margin-top:8px;justify-content:flex-end">' +
+            (x.type === 'reco' && !x.vin_id && (ficheObj(x) || estAdmin()) ? '<button class="ghost small" data-efiche="' + esc(x.id) + '">📋 Fiche</button>' : '') +
             (x.recu && x.type === 'reco' && !x.vin_id && estAdmin() ? (x.statut === 'traite' ? '<span class="small muted">Ajoutée à la prospection</span>'
               : '<button class="ghost small" data-prosp="' + esc(x.id) + '">→ Prospection</button>') : '') +
             (x.envoye || estAdmin() ? '<button class="ghost small" data-suppr-ech="' + esc(x.id) + '"' + (dest && dest.length > 1 ? ' data-groupe="' + esc(dest.map(function (d) { return d.id; }).join(',')) + '"' : '') + '>Supprimer</button>' : '') +
@@ -820,13 +821,19 @@
         }
         envoyerEch($('#f-reco button[type=submit]'), d, estAdmin() ? 'Recommandation envoyée' : 'Merci, ' + r.proprietaire + ' la verra dans ses échanges', recharger);
       };
+      $$('[data-efiche]').forEach(function (bt) {
+        bt.onclick = function () {
+          var x = items.filter(function (i) { return i.id === bt.getAttribute('data-efiche'); })[0];
+          dialogueFiche(x, estAdmin() ? function (re) { return api('echanges.fiche', { id: x.id, regenerer: re }); } : null);
+        };
+      });
       $$('[data-prosp]').forEach(function (bt) {
         bt.onclick = function () {
           var x = items.filter(function (i) { return i.id === bt.getAttribute('data-prosp'); })[0];
           busy(bt, true);
           api('prosp.enregistrer', { domaine: x.domaine, nom: x.nom, millesime: x.millesime, couleur: x.couleur, appellation: x.appellation,
             type: 'Vin', prix_vu: x.prix, lieu: x.lieu, origine: 'recommandation', statut: 'repere', date_vue: today(),
-            note: 'Recommandée par ' + x.de_nom + (x.message ? ' : ' + x.message : '') })
+            note: 'Recommandée par ' + x.de_nom + (x.message ? ' : ' + x.message : ''), fiche: x.fiche || '' })
             .then(function () { return api('echanges.marquer', { ids: [x.id], statut: 'traite' }); })
             .then(function () { toast('Ajoutée à la prospection'); recharger(); })
             .catch(function (e) { busy(bt, false); fail(e); });
@@ -932,10 +939,20 @@
                 (r.cote_commentaire ? '<p class="small muted" style="margin:4px 0 0">' + esc(r.cote_commentaire) + '</p>' : '') : '') + '</div>' +
           '</div>' +
           '<p class="small muted" style="margin:12px 0 0">Proposition de l’IA, à prendre avec recul : les années de garde et les prix sont des estimations.</p>' +
-          (estAdmin() ? '' : '<div class="row" style="margin-top:12px"><span class="spacer"></span><button id="an-reco">💡 Recommander à ' + esc(proprio()) + '</button></div>') +
+          '<div class="row" style="margin-top:12px"><span class="spacer"></span>' +
+            (estAdmin() ? '<button class="ghost" id="an-prosp">→ Prospection</button>' : '<button class="ghost" id="an-carnet">💾 Garder dans mon carnet</button><button id="an-reco">💡 Recommander à ' + esc(proprio()) + '</button>') + '</div>' +
         '</div>';
         $('#an-res').scrollIntoView({ behavior: 'smooth', block: 'start' });
         if ($('#an-reco')) $('#an-reco').onclick = function () { dialogueRecoAnalyse(r); };
+        if ($('#an-carnet')) $('#an-carnet').onclick = function () {
+          dialogueCarnet({ domaine: r.domaine, nom: r.nom, millesime: r.millesime, appellation: r.appellation, couleur: r.couleur, type: r.type, fiche: ficheDepuis(r) });
+        };
+        if ($('#an-prosp')) $('#an-prosp').onclick = function () {
+          var bt = this; busy(bt, true);
+          api('prosp.enregistrer', { domaine: r.domaine, nom: r.nom, millesime: r.millesime, appellation: r.appellation, couleur: r.couleur, type: r.type || 'Vin',
+            statut: 'repere', origine: 'degustation', date_vue: today(), fiche: ficheDepuis(r) })
+            .then(function () { delete cache.prosp; busy(bt, false); bt.disabled = true; bt.textContent = '✓ En prospection'; }).catch(function (e) { busy(bt, false); fail(e); });
+        };
       }
     });
   }
@@ -952,9 +969,118 @@
         $('#f-ra', root).onsubmit = function (e) {
           e.preventDefault();
           envoyerEch($('button[type=submit]', this), { type: 'reco', domaine: r.domaine, nom: r.nom, millesime: r.millesime, appellation: r.appellation, couleur: r.couleur,
-            lieu: $('#ra-lieu', root).value.trim(), prix: $('#ra-prix', root).value, message: $('#ra-msg', root).value.trim() }, 'Merci, ' + proprio() + ' la verra dans ses échanges');
+            lieu: $('#ra-lieu', root).value.trim(), prix: $('#ra-prix', root).value, message: $('#ra-msg', root).value.trim(),
+            fiche: r._fiche || ficheDepuis(r) }, 'Merci, ' + proprio() + ' la verra dans ses échanges');
         };
       });
+  }
+
+  /* =========================================================
+   * Fiche d'un vin hors cave (recommandation, prospection, carnet) et carnet personnel
+   * ======================================================= */
+  function ficheObj(x) {
+    if (!x || !x.fiche) return null;
+    if (typeof x.fiche === 'object') return x.fiche;
+    try { return JSON.parse(x.fiche); } catch (e) { return null; }
+  }
+  /** Sous-ensemble d'une analyse IA à conserver comme fiche (sans prix). */
+  function ficheDepuis(r) {
+    var f = {};
+    ['type', 'categorie', 'couleur', 'appellation', 'region', 'pays', 'cepages', 'degre', 'description', 'aromes_nez', 'aromes_bouche',
+     'temp_service', 'carafage', 'boire_des', 'apogee_debut', 'apogee_fin', 'boire_avant', 'accords'].forEach(function (k) { if (r[k] !== undefined && r[k] !== '' && r[k] !== null) f[k] = r[k]; });
+    return JSON.stringify(f);
+  }
+  function htmlFiche(f, x) {
+    var kv = function (k, val) { return val ? '<dt>' + k + '</dt><dd>' + val + '</dd>' : ''; };
+    var tags = function (s) { return '<div class="tags">' + splitList(s).map(function (a) { return '<span class="tag">' + esc(a) + '</span>'; }).join('') + '</div>'; };
+    var v = Object.assign({}, f, { millesime: x.millesime });
+    var garde = num(v.boire_des) || num(v.apogee_debut) || num(v.apogee_fin) || num(v.boire_avant);
+    if (garde) v.maturite = maturiteLocale(v);
+    return '<p class="muted" style="margin-top:-4px">' + esc([f.type, f.categorie, f.couleur || x.couleur, f.appellation || x.appellation, f.region, f.pays]
+        .filter(Boolean).filter(function (y, i, t) { return t.indexOf(y) === i; }).join(' · ')) + (garde ? ' ' + pillMat(v.maturite) : '') + '</p>' +
+      (f.description ? '<p>' + esc(f.description) + '</p>' : '') +
+      (garde ? '<h3>Quand la boire</h3>' + frise(v) + conseilMaturite(v) : '') +
+      '<dl class="kv" style="margin-top:12px">' + kv('Nez', f.aromes_nez ? tags(f.aromes_nez) : '') + kv('Bouche', esc(f.aromes_bouche)) +
+        kv('Service', esc(f.temp_service)) + kv('Carafage', esc(f.carafage)) + kv('Cépages', esc(f.cepages)) + kv('Degré', f.degre ? esc(f.degre) + (/%|°/.test(String(f.degre)) ? '' : ' %') : '') +
+        kv('Accords', f.accords ? tags(f.accords) : '') + '</dl>';
+  }
+  /** Affiche la fiche ; « generer » (facultatif) la crée avec l'IA quand elle manque. */
+  function dialogueFiche(x, generer, apres) {
+    var titre = '<h2 style="margin-bottom:4px">' + esc(libelle(x)) + (x.millesime ? ' ' + esc(x.millesime) : '') + '</h2>';
+    var f = ficheObj(x);
+    modal(titre + (f ? htmlFiche(f, x) + '<p class="small muted">Fiche proposée par l’IA ou le vendeur, à prendre avec recul.</p>'
+        : '<p class="muted">Pas encore de fiche pour ce vin.' + (generer ? ' L’IA peut la rédiger : description, garde, arômes, service et accords (une requête).' : '') + '</p>') +
+      '<div class="row" style="margin-top:12px"><span class="spacer"></span>' + (generer ? '<button class="ghost" id="fi-gen">✨ ' + (f ? 'Régénérer' : 'Générer la fiche') + '</button>' : '') +
+      '<button id="m-annuler">Fermer</button></div>',
+      function (root) {
+        $('#m-annuler', root).onclick = closeModal;
+        if ($('#fi-gen', root)) $('#fi-gen', root).onclick = function () {
+          var bt = this; busy(bt, true, 'Rédaction…');
+          generer(!!f).then(function (r) { x.fiche = r.fiche; if (apres) apres(); dialogueFiche(x, generer, apres); })
+            .catch(function (e) { busy(bt, false); fail(e); });
+        };
+      });
+  }
+
+  /** Enregistrer un vin dans son carnet (avec sa fiche si elle vient d'une analyse). */
+  function dialogueCarnet(x, apres) {
+    x = x || {};
+    var nouveau = !x.id;
+    modal('<h2>' + (nouveau ? 'Garder dans mon carnet' : 'Modifier') + '</h2>' +
+      (x.fiche ? '<p class="small muted" style="margin-top:-4px">La fiche de l’analyse est gardée avec le vin.</p>' : '') +
+      '<form id="f-car"><div class="grid g2" style="gap:10px">' +
+        '<div><label for="ca-dom">Domaine / producteur</label><input id="ca-dom" maxlength="120" value="' + esc(x.domaine || '') + '"></div>' +
+        '<div><label for="ca-nom">Cuvée</label><input id="ca-nom" maxlength="120" value="' + esc(x.nom || '') + '"></div>' +
+        '<div><label for="ca-mil">Millésime</label><input id="ca-mil" maxlength="10" inputmode="numeric" value="' + esc(x.millesime || '') + '"></div>' +
+        '<div><label for="ca-app">Appellation</label><input id="ca-app" maxlength="120" value="' + esc(x.appellation || '') + '"></div>' +
+        '<div><label for="ca-note">Ma note /20</label><input id="ca-note" type="number" min="0" max="20" step="0.5" value="' + esc(x.note === undefined ? '' : x.note) + '"></div>' +
+        '<div><label for="ca-lieu">Où</label><input id="ca-lieu" maxlength="120" placeholder="Restaurant, caviste, chez des amis…" value="' + esc(x.lieu || '') + '"></div></div>' +
+      '<label for="ca-com">Mes impressions</label><textarea id="ca-com" maxlength="1000">' + esc(x.commentaire || '') + '</textarea>' +
+      '<div class="row"><span class="spacer"></span><button type="button" class="ghost" id="m-annuler">Annuler</button><button type="submit">💾 Enregistrer</button></div></form>',
+      function (root) {
+        $('#m-annuler', root).onclick = closeModal;
+        $('#f-car', root).onsubmit = function (e) {
+          e.preventDefault();
+          var d = { id: x.id, domaine: $('#ca-dom', root).value, nom: $('#ca-nom', root).value, millesime: $('#ca-mil', root).value, appellation: $('#ca-app', root).value,
+            couleur: x.couleur || '', type: x.type || '', note: $('#ca-note', root).value, lieu: $('#ca-lieu', root).value, commentaire: $('#ca-com', root).value };
+          if (nouveau && x.fiche) d.fiche = typeof x.fiche === 'string' ? x.fiche : JSON.stringify(x.fiche);
+          var bt = $('button[type=submit]', this); busy(bt, true);
+          api('carnet.enregistrer', d).then(function () { closeModal(); toast(nouveau ? 'Ajouté à votre carnet' : 'Enregistré'); if (apres) apres(); })
+            .catch(function (err) { busy(bt, false); fail(err); });
+        };
+      });
+  }
+
+  function vueCarnet(v) {
+    return api('carnet.lister').then(function (r) {
+      var l = r.items || [];
+      v.innerHTML = '<div class="head"><h1>Mon carnet</h1><span class="muted">' + l.length + ' vin' + (l.length > 1 ? 's' : '') + (r.max ? ' sur ' + r.max + ' possibles' : '') + '</span>' +
+        '<span class="spacer"></span><a class="btn ghost ia-only" href="#/analyser">🔎 Analyser une bouteille</a><button id="ca-new">+ Ajouter</button></div>' +
+        '<p class="muted" style="margin-top:-6px">Les vins bus ou repérés ailleurs, avec leur fiche quand ils ont été analysés. Visible par vous seul.</p>' +
+        (l.length ? '<div class="bottles">' + l.map(function (x) {
+          var f = ficheObj(x);
+          return '<div class="card"><div class="row" style="gap:6px">' + dot(x.couleur || (f && f.couleur)) + '<strong style="flex:1;min-width:0">' + esc(libelle(x)) + (x.millesime ? ' ' + esc(x.millesime) : '') + '</strong>' +
+              (x.note !== '' && x.note !== undefined ? '<span class="pill">' + esc(x.note) + '/20</span>' : '') + '</div>' +
+            '<div class="small muted">' + esc([x.appellation, x.lieu, dateFr(x.cree_le)].filter(Boolean).join(' · ')) + '</div>' +
+            (x.commentaire ? '<p class="small" style="margin:6px 0 0;white-space:pre-wrap">' + esc(x.commentaire) + '</p>' : '') +
+            '<div class="row" style="margin-top:8px;gap:6px">' + (f ? '<button class="ghost small" data-cfiche="' + esc(x.id) + '">📋 Fiche</button>' : '') +
+              '<button class="ghost small" data-cedit="' + esc(x.id) + '">Modifier</button>' +
+              (estAdmin() ? '' : '<button class="ghost small" data-creco="' + esc(x.id) + '">💡 Recommander</button>') +
+              '<button class="ghost small" data-csuppr="' + esc(x.id) + '">🗑</button></div></div>';
+        }).join('') + '</div>' : '<div class="card empty">Votre carnet est vide. Analysez une bouteille au restaurant ou chez un caviste, puis « Garder dans mon carnet ».</div>');
+      var parId = function (id) { return l.filter(function (x) { return x.id === id; })[0]; };
+      var recharger = function () { route(); };
+      $('#ca-new').onclick = function () { dialogueCarnet({}, recharger); };
+      $$('[data-cfiche]').forEach(function (b) { b.onclick = function () { dialogueFiche(parId(b.getAttribute('data-cfiche'))); }; });
+      $$('[data-cedit]').forEach(function (b) { b.onclick = function () { dialogueCarnet(parId(b.getAttribute('data-cedit')), recharger); }; });
+      $$('[data-creco]').forEach(function (b) { b.onclick = function () { var x = parId(b.getAttribute('data-creco')); dialogueRecoAnalyse(Object.assign({}, ficheObj(x) || {}, x, { _fiche: x.fiche })); }; });
+      $$('[data-csuppr]').forEach(function (b) {
+        b.onclick = function () {
+          if (!window.demoConfirm('Retirer ce vin de votre carnet ?')) return;
+          api('carnet.supprimer', { id: b.getAttribute('data-csuppr') }).then(function () { toast('Retiré du carnet'); recharger(); }).catch(fail);
+        };
+      });
+    });
   }
 
   function carteBouteille(b, vign) {
@@ -1588,8 +1714,9 @@
     var p = edition ? api('cave.lire', { id: id })
       : params.pro ? charger('prosp', 'prosp.lister', true).then(function (l) {
           var pr = l.filter(function (x) { return x.id === params.pro; })[0] || {};
-          return { nom: pr.nom, domaine: pr.domaine, type: pr.type, couleur: pr.couleur, appellation: pr.appellation,
-            millesime: pr.millesime, _prix: pr.prix_vu, _fournisseur: pr.lieu, _pro: pr.id };
+          var f = ficheObj(pr) || {};
+          return Object.assign({}, f, { nom: pr.nom, domaine: pr.domaine, type: pr.type || f.type, couleur: pr.couleur || f.couleur, appellation: pr.appellation || f.appellation,
+            millesime: pr.millesime, _prix: pr.prix_vu, _fournisseur: pr.lieu, _pro: pr.id });
         })
       : params.off ? api('offres.lire', { id: params.off }).then(function (o) {
           var x = (o.analyse.articles || []).filter(function (y) { return String(y.n) === String(params.n); })[0] || {};
@@ -2157,13 +2284,20 @@
                 (num(p.priorite) && s !== 'memo' ? ' · ' + '★★★'.slice(0, num(p.priorite)) : '') + '</div>' +
                 (p.note ? '<p class="small" style="margin:6px 0 0">' + esc(p.note) + '</p>' : '') +
                 (p.url ? '<p class="small" style="margin:4px 0 0"><a href="' + esc(/^https?:\/\//.test(p.url) ? p.url : '#') + '" target="_blank" rel="noopener noreferrer">Lien ↗</a></p>' : '') +
-                '<div class="row" style="margin-top:8px;gap:6px"><button class="ghost small" data-edit="' + esc(p.id) + '">Modifier</button>' +
+                '<div class="row" style="margin-top:8px;gap:6px"><button class="ghost small" data-pfiche="' + esc(p.id) + '">📋 Fiche' + (p.fiche ? '' : ' ✨') + '</button>' +
+                  '<button class="ghost small" data-edit="' + esc(p.id) + '">Modifier</button>' +
                 (s !== 'achete' ? '<a class="btn small" href="#/ajouter?pro=' + encodeURIComponent(p.id) + '">Acheté → cave</a>' : '') + '</div></div>';
             }).join('') + '</div>';
         }).join('') + '</div>';
 
       $('#p-new').onclick = function () { dialogueProsp({}); };
       $('#p-memo').onclick = function () { dialogueMemo(); };
+      $$('[data-pfiche]').forEach(function (b) {
+        b.onclick = function () {
+          var p = list.filter(function (x) { return x.id === b.getAttribute('data-pfiche'); })[0];
+          dialogueFiche(p, function (re) { return api('prosp.fiche', { id: p.id, regenerer: re }); }, function () { delete cache.prosp; b.textContent = '📋 Fiche'; });
+        };
+      });
       $$('[data-edit]').forEach(function (b) {
         b.onclick = function () { dialogueProsp(list.filter(function (p) { return p.id === b.getAttribute('data-edit'); })[0]); };
       });
